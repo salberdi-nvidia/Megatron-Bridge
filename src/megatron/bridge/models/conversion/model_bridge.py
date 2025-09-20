@@ -115,6 +115,9 @@ def _megatron_local_name_to_global(
     vp_stage: Optional[int] = None,
 ) -> str:
     """Adjust layer number and expert number from local to global numbering."""
+    # handle kitchen pre linear norm
+    param_name = param_name.replace("kitchen_pre_linear_norm.", "layer_norm_")
+
     # PP
     pp_group = parallel_state.get_pipeline_model_parallel_group()
     if "layers." in param_name and get_pg_size(pp_group) > 1:
