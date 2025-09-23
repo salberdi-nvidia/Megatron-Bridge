@@ -21,7 +21,7 @@ import torch
 from megatron.bridge.data.builders.hf_dataset import HFDatasetConfig
 from megatron.bridge.data.datasets.packed_sequence import PackedSequenceSpecs
 from megatron.bridge.data.hf_processors.squad import process_squad_example
-from megatron.bridge.models.llama import Llama3ModelProvider
+from megatron.bridge.models.llama import Llama32ModelProvider1B
 from megatron.bridge.peft.lora import LoRA
 from megatron.bridge.training.config import (
     CheckpointConfig,
@@ -48,14 +48,13 @@ from tests.functional_tests.utils import (
 
 
 @dataclass
-class Llama3ModelProvider145M(Llama3ModelProvider):
-    rotary_base: int = 500_000
-    num_layers: int = 2
-    hidden_size: int = 768
-    ffn_hidden_size: int = 2688
-    num_attention_heads: int = 16
-    make_vocab_size_divisible_by: int = 128
-    vocab_size: int | None = 128256
+class Llama32ModelProvider1BTest(Llama32ModelProvider1B):
+    """Llama 3.2 1B model configuration optimized for testing with mixed precision."""
+
+    # Reduce layers for faster testing while maintaining proper model structure
+    num_layers: int = 4
+    # Use smaller sequence length for testing
+    seq_length: int = 512
 
 
 class TestLoRAFinetune:
@@ -173,9 +172,57 @@ class TestLoRAFinetune:
         finally:
             clear_directories(shared_base_dir)
 
+    @pytest.mark.run_only_on("GPU")
+    def test_lora_finetune_with_packed_sequences(self, tmp_path):
+        """Test LoRA finetuning with packed sequences using Squad dataset."""
+        initialize_distributed()
+        shared_base_dir = broadcast_path(tmp_path)
+        pretrain_checkpoint_dir, pretrain_tensorboard_dir, lora_checkpoint_dir, lora_tensorboard_dir = (
+            self._setup_directories(shared_base_dir, "_packed")
+        )
+
+        torch.distributed.barrier()
+
+        try:
+            seq_length = 512
+            packed_sequence_size = 1024  # Use larger pack size to test packing
+            pretrain_iters = 10
+            lora_iters = 5
+
+            # Create pretrain config and run
+            pretrain_cfg = self._create_pretrain_config(
+                pretrain_iters, pretrain_checkpoint_dir, pretrain_tensorboard_dir, seq_length
+            )
+            pretrain(pretrain_cfg, forward_step)
+            verify_checkpoint_files(pretrain_checkpoint_dir, pretrain_iters)
+
+            # Create LoRA config with packed sequences and run finetuning
+            lora_cfg = self._create_lora_config(
+                lora_iters,
+                lora_checkpoint_dir,
+                lora_tensorboard_dir,
+                pretrain_checkpoint_dir,
+                seq_length,
+                packed_sequences=True,
+                max_train_samples=50,  # Use small subset for faster testing
+            )
+
+            # Override the packed sequence size to be larger than seq_length for proper testing
+            lora_cfg.dataset.packed_sequence_specs.packed_sequence_size = packed_sequence_size
+
+            # Ensure micro_batch_size is 1 for packed sequences (requirement)
+            lora_cfg.train.micro_batch_size = 1
+
+            finetune(lora_cfg, forward_step)
+            verify_checkpoint_files(lora_checkpoint_dir, lora_iters)
+            verify_peft_checkpoint_smaller(pretrain_checkpoint_dir, lora_checkpoint_dir, pretrain_iters, lora_iters)
+
+        finally:
+            clear_directories(shared_base_dir)
+
     def _create_model_provider(self, seq_length=512, tensor_parallel_size=1, pipeline_parallel_size=1):
         """Create a model provider with specified configuration."""
-        return Llama3ModelProvider145M(
+        return Llama32ModelProvider1BTest(
             seq_length=seq_length,
             tensor_model_parallel_size=tensor_parallel_size,
             pipeline_model_parallel_size=pipeline_parallel_size,
@@ -246,7 +293,7 @@ class TestLoRAFinetune:
             num_workers=1,
         )
 
-    def _create_squad_dataset_config(self, seq_length, seed=5678, packed_sequences=False):
+    def _create_squad_dataset_config(self, seq_length, seed=5678, packed_sequences=False, max_train_samples=None):
         """Create a SQuAD dataset configuration."""
         if packed_sequences:
             dataset_kwargs = {"pad_to_max_length": True}
@@ -267,6 +314,7 @@ class TestLoRAFinetune:
             val_proportion=None,
             dataset_kwargs=dataset_kwargs,
             packed_sequence_specs=packed_sequence_specs,
+            max_train_samples=max_train_samples,
             rewrite=False,
         )
 
@@ -341,6 +389,7 @@ class TestLoRAFinetune:
             tokenizer=self._create_pretrain_tokenizer_config(),
             checkpoint=self._create_checkpoint_config(train_iters, checkpoint_dir),
             rng=self._create_rng_config(),
+            mixed_precision="bf16_mixed",
         )
 
     def _create_lora_config(
@@ -355,6 +404,7 @@ class TestLoRAFinetune:
         packed_sequences=False,
         load_checkpoint=None,
         scheduler_total_iters=None,
+        max_train_samples=None,
     ):
         """Create complete LoRA finetuning configuration with model and PEFT."""
         model = self._create_model_provider(seq_length, tensor_parallel_size, pipeline_parallel_size)
@@ -369,7 +419,9 @@ class TestLoRAFinetune:
             optimizer=self._create_optimizer_config(lr=1e-4),  # Lower LR for finetuning
             scheduler=self._create_scheduler_config(scheduler_iters),
             ddp=self._create_ddp_config(),
-            dataset=self._create_squad_dataset_config(seq_length, packed_sequences=packed_sequences),
+            dataset=self._create_squad_dataset_config(
+                seq_length, packed_sequences=packed_sequences, max_train_samples=max_train_samples
+            ),
             logger=self._create_logger_config(tensorboard_dir),
             tokenizer=self._create_finetune_tokenizer_config(),
             checkpoint=self._create_checkpoint_config(
@@ -377,6 +429,7 @@ class TestLoRAFinetune:
             ),
             rng=self._create_rng_config(seed=5678),
             peft=lora_peft,
+            mixed_precision="bf16_mixed",
         )
 
     def _setup_directories(self, base_dir, suffix=""):
