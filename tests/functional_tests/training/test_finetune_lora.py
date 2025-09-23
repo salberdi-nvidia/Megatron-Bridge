@@ -21,7 +21,7 @@ import torch
 from megatron.bridge.data.builders.hf_dataset import HFDatasetConfig
 from megatron.bridge.data.datasets.packed_sequence import PackedSequenceSpecs
 from megatron.bridge.data.hf_processors.squad import process_squad_example
-from megatron.bridge.models.llama import Llama32ModelProvider1B
+from megatron.bridge.models.llama import Llama3ModelProvider
 from megatron.bridge.peft.lora import LoRA
 from megatron.bridge.training.config import (
     CheckpointConfig,
@@ -48,13 +48,16 @@ from tests.functional_tests.utils import (
 
 
 @dataclass
-class Llama32ModelProvider1BTest(Llama32ModelProvider1B):
-    """Llama 3.2 1B model configuration optimized for testing with mixed precision."""
+class Llama3ModelProvider145M(Llama3ModelProvider):
+    """Smaller Llama3 config used previously for functional tests."""
 
-    # Reduce layers for faster testing while maintaining proper model structure
-    num_layers: int = 4
-    # Use smaller sequence length for testing
-    seq_length: int = 512
+    rotary_base: int = 500_000
+    num_layers: int = 2
+    hidden_size: int = 768
+    ffn_hidden_size: int = 2688
+    num_attention_heads: int = 16
+    make_vocab_size_divisible_by: int = 128
+    vocab_size: int | None = 128256
 
 
 class TestLoRAFinetune:
@@ -185,7 +188,7 @@ class TestLoRAFinetune:
 
         try:
             seq_length = 512
-            packed_sequence_size = 1024  # Use larger pack size to test packing
+            packed_sequence_size = 4096  # Use larger pack size to test packing (matching NeMo)
             pretrain_iters = 10
             lora_iters = 5
 
@@ -202,14 +205,9 @@ class TestLoRAFinetune:
                 lora_checkpoint_dir,
                 lora_tensorboard_dir,
                 pretrain_checkpoint_dir,
-                seq_length,
+                packed_sequence_size,
                 packed_sequences=True,
-                max_train_samples=50,  # Use small subset for faster testing
             )
-
-            # Override the packed sequence size to be larger than seq_length for proper testing
-            lora_cfg.dataset.packed_sequence_specs.packed_sequence_size = packed_sequence_size
-
             # Ensure micro_batch_size is 1 for packed sequences (requirement)
             lora_cfg.train.micro_batch_size = 1
 
@@ -222,7 +220,7 @@ class TestLoRAFinetune:
 
     def _create_model_provider(self, seq_length=512, tensor_parallel_size=1, pipeline_parallel_size=1):
         """Create a model provider with specified configuration."""
-        return Llama32ModelProvider1BTest(
+        return Llama3ModelProvider145M(
             seq_length=seq_length,
             tensor_model_parallel_size=tensor_parallel_size,
             pipeline_model_parallel_size=pipeline_parallel_size,
