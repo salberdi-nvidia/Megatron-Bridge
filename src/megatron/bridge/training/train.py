@@ -1024,6 +1024,7 @@ def _finish_train(global_state: GlobalState, should_destroy_process_group: bool 
     destroy_global_state()
 
     if should_destroy_process_group and torch.distributed.is_initialized():
+        torch.distributed.barrier()
         torch.distributed.destroy_process_group()
 
 
