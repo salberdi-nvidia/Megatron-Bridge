@@ -170,6 +170,10 @@ def main():
                recipe.model.gradient_accumulation_fusion = False
     recipe.model.apply_rope_fusion = True
 
+    if args.model_name == "deepseek" and args.model_size == "v3" and args.gpu.lower() in ["gb200"]:
+        recipe.dataset.num_workers = 0
+        recipe.dataset.pin_memory = False
+
     pretrain(config=recipe, forward_step_func=forward_step)
 
 
