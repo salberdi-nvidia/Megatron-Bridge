@@ -104,7 +104,7 @@ class MockQwen25VLDataset(torch.utils.data.Dataset):
 
         input_ids: torch.Tensor = inputs.input_ids[0]  # [L]
         # Enforce exact sequence length by truncating or padding with random token ids
-        target_len = int(self.config.sequence_length)
+        target_len = int(self.config.sequence_length) + 1
         cur_len = input_ids.numel()
         if cur_len > target_len:
             input_ids = input_ids[:target_len]

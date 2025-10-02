@@ -99,11 +99,12 @@ def main() -> None:
     logger.info("Megatron-Bridge Qwen2.5-VL Pretraining Script with YAML & CLI Overrides")
     logger.info("-----------------------------------------------------------------------")
 
-    # Determine whether to use the preloaded dataset provider
+    # Determine dataset type based on CLI flags
     use_preloaded_flag = bool(args.data_path) or bool(args.use_preloaded)
+    dataset_type = "preloaded" if use_preloaded_flag else "mock"
 
     cfg: ConfigContainer = pretrain_config(
-        use_preloaded=use_preloaded_flag,
+        dataset_type=dataset_type,
         train_data_path=args.data_path,
         valid_data_path=None,
         test_data_path=None,
