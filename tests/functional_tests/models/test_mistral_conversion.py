@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 import torch
-from transformers import AutoConfig, AutoTokenizer, MistralForCausalLM
+from transformers import AutoTokenizer, MistralConfig, MistralForCausalLM
 
 
 HF_MISTRAL_TOY_MODEL_CONFIG = {
@@ -67,7 +67,7 @@ class TestMistralConversion:
         model_dir = temp_dir / "mistral_toy"
 
         # Create Mistral config from the toy model config
-        config = AutoConfig.from_pretrained("mistralai/Mistral-7B-Instruct-v0.3", trust_remote_code=True)
+        config = MistralConfig(**HF_MISTRAL_TOY_MODEL_CONFIG)
         for k, v in HF_MISTRAL_TOY_MODEL_CONFIG.items():
             setattr(config, k, v)
         config.torch_dtype = torch.bfloat16  # Explicitly set the torch_dtype in config
@@ -84,7 +84,7 @@ class TestMistralConversion:
         # Download and save tokenizer from a reference Mistral model
         # We use the smallest available Mistral model for tokenizer artifacts
         try:
-            tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.3")
+            tokenizer = AutoTokenizer.from_pretrained("gpt2")
             tokenizer.save_pretrained(model_dir)
         except Exception as e:
             print(f"Warning: Could not download tokenizer, creating minimal tokenizer files: {e}")
