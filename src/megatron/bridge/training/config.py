@@ -655,6 +655,14 @@ class LoggerConfig:
     log_throughput: bool = False
     """If set, calculate and log throughput per GPU."""
 
+    log_throughput_to_tensorboard: bool = False
+    """Enable throughput logging to tensorboard."""
+
+    log_throughput_to_wandb: bool = False
+    """Enable throughput logging to wandb."""
+
+    throughput_window_size: int = 100
+
     log_progress: bool = False
     """If set, log progress (in terms of number of processed tokens and number of floating-point operations)
     to progress.txt file in checkpoint directory.
@@ -707,12 +715,6 @@ class LoggerConfig:
 
     log_l2_norm_grad_to_wandb: bool = False
     """Enable gradients logging to wandb."""
-
-    log_throughput_to_tensorboard: bool = False
-    """Enable throughput logging to tensorboard."""
-
-    log_throughput_to_wandb: bool = False
-    """Enable throughput logging to wandb."""
 
     log_runtime_to_tensorboard: bool = False
     """Enable runtime metrics logging to tensorboard."""

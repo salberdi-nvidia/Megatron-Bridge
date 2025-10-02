@@ -351,7 +351,7 @@ def training_log(
     num_zeros_in_grad: Optional[int],
     config: ConfigContainer,
     global_state: GlobalState,
-    callbacks: Optional[list],
+    history_wct: list,
     model,
 ) -> bool:
     """Log training stats (losses, learning rate, timings, etc.).
@@ -460,6 +460,16 @@ def training_log(
 
                 with open(config.profiling.memory_snapshot_path, "wb") as f:
                     dump(snapshot, f)
+        if wandb_writer and logger_config.log_throughput_to_wandb:
+            throughput_report = report_throughput(
+                train_state.consumed_train_samples,
+                iteration,
+                train_config,
+                config.dataset.sequence_length,
+                history_wct,
+                window_size=6,
+            )
+            wandb_writer.log(throughput_report, iteration)
         if wandb_writer and logger_config.log_memory_to_wandb:
             memory_report = {f"memory/{metric}": value for metric, value in report_memory().items()}
             wandb_writer.log(memory_report, iteration)
@@ -470,9 +480,9 @@ def training_log(
             for metric, value in calc_l2_norm_grad(model).items():
                 writer.add_scalar(metric, value, iteration)
         if wandb_writer:
-            wandb_writer.log({"samples vs steps": global_state.train_state.consumed_train_samples}, iteration)
+            wandb_writer.log({"samples vs steps": train_state.consumed_train_samples}, iteration)
         writer.add_scalar("learning-rate", learning_rate, iteration)
-        writer.add_scalar("learning-rate vs samples", learning_rate, global_state.train_state.consumed_train_samples)
+        writer.add_scalar("learning-rate vs samples", learning_rate, train_state.consumed_train_samples)
         if wandb_writer:
             wandb_writer.log({"learning-rate": learning_rate}, iteration)
         if config.optimizer.decoupled_lr is not None:
@@ -696,6 +706,47 @@ def runtime_report(
     time_metrics['time/total'] = (time.time() - start_time) / divider
 
     return time_metrics
+
+
+def report_throughput(
+    consumed_train_samples: int,
+    iteration: int, 
+    train_config,
+    seq_length: int,
+    history_wct: list,
+    window_size: int = 100,
+) -> dict:
+    if iteration >= (window_size - 1):
+        history_iters = [i for i in range(iteration - window_size + 1, iteration + 1)]
+        history_samples = [i * train_config.global_batch_size for i in history_iters]
+        history_tokens = [i * seq_length for i in history_samples]
+        print(history_iters, history_samples, history_tokens)
+        world_size = torch.distributed.get_world_size()
+        elapsed_batches = len(history_samples) - 1
+        elapsed_samples = int(history_samples[-1]) - int(history_samples[0])
+        elapsed_tokens = int(history_tokens[-1]) - int(history_tokens[0])
+        elapsed_wct = history_wct[-1] - history_wct[0]
+        batches_per_sec = elapsed_batches / elapsed_wct
+        samples_per_sec = elapsed_samples / elapsed_wct
+        dev_batches_per_sec = batches_per_sec / world_size
+        dev_samples_per_sec = samples_per_sec / world_size
+        metrics = {
+            'throughput/batches_per_sec': batches_per_sec,
+            'throughput/samples_per_sec': samples_per_sec,
+            'throughput/device/batches_per_sec': dev_batches_per_sec,
+            'throughput/device/samples_per_sec': dev_samples_per_sec,
+            'throughput/micro_batch_size': train_config.micro_batch_size,
+            'throughput/global_batch_size': train_config.global_batch_size,
+        }
+        if elapsed_tokens > 0:
+            tokens_per_sec = elapsed_tokens / elapsed_wct
+            dev_tokens_per_sec = tokens_per_sec / world_size
+            metrics.update({'throughput/tokens_per_sec': tokens_per_sec})
+            metrics.update({'throughput/device/tokens_per_sec': dev_tokens_per_sec})
+
+        return metrics
+
+    return {}
 
 
 def maybe_inject_state(forward_step_func: Callable, state: GlobalState, num_fw_args: Optional[int] = None) -> Callable:
