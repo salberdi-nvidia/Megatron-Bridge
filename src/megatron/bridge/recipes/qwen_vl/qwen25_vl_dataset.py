@@ -44,12 +44,12 @@ class MockQwen25VLDataset(torch.utils.data.Dataset):
 
         # Infer tokenizer from processor
         try:
-            self._hf_tokenizer = getattr(config.processor, "tokenizer", None)
+            self._hf_tokenizer = getattr(config._processor, "tokenizer", None)
         except Exception:
             self._hf_tokenizer = None
 
         if self._hf_tokenizer is None:
-            raise ValueError("config.processor must have a 'tokenizer' attribute")
+            raise ValueError("config._processor must have a 'tokenizer' attribute")
 
         if self._hf_tokenizer.pad_token_id is None and getattr(self._hf_tokenizer, "eos_token_id", None) is not None:
             # Ensure pad token exists for stable padding/loss masking
@@ -83,7 +83,7 @@ class MockQwen25VLDataset(torch.utils.data.Dataset):
         ]
 
         # The chat template will insert appropriate placeholders for the image token(s)
-        text = self.config.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        text = self.config._processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
         images: Optional[list[Image.Image]] = None
         if num_images > 0:
@@ -100,7 +100,7 @@ class MockQwen25VLDataset(torch.utils.data.Dataset):
         if self.config.pad_to_max_length:
             processor_kwargs["max_length"] = self.config.sequence_length
 
-        inputs = self.config.processor(**processor_kwargs)
+        inputs = self.config._processor(**processor_kwargs)
 
         input_ids: torch.Tensor = inputs.input_ids[0]  # [L]
         # Enforce exact sequence length by truncating or padding with random token ids
@@ -200,11 +200,11 @@ class MockQwen25VLDatasetProvider(DatasetProvider):
     # Keep parity with GPTDatasetConfig usage in batching utilities
     skip_getting_attention_mask_from_dataset: bool = True
 
-    # HF AutoProcessor instance will be set during build
-    processor: Optional[Any] = None
-
     # Number of images per sample
     num_images: int = 1
+
+    # HF AutoProcessor instance will be set during build
+    _processor: Optional[Any] = None
 
     def build_datasets(self, context: DatasetBuildContext):
         """Create mock Qwen2.5-VL datasets for train/valid/test splits.
@@ -219,7 +219,7 @@ class MockQwen25VLDatasetProvider(DatasetProvider):
         from transformers import AutoProcessor
 
         # Initialize and store processor on the provider so the dataset can use it
-        self.processor = AutoProcessor.from_pretrained(self.hf_model_path, trust_remote_code=True)
+        self._processor = AutoProcessor.from_pretrained(self.hf_model_path, trust_remote_code=True)
 
         def _maybe_make(size: int) -> Optional[MockQwen25VLDataset]:
             return MockQwen25VLDataset(size=size, config=self) if size and size > 0 else None

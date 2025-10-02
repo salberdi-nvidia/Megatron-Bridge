@@ -48,8 +48,7 @@ def pretrain_config(
     valid_data_path: Optional[List[str]] = None,
     test_data_path: Optional[List[str]] = None,
     per_split_data_args_path: Optional[str] = None,
-    mock: bool = False,
-    use_preloaded: bool = False,
+    dataset_type: Optional[str] = None,
     image_folder: Optional[str] = None,
     # Model configuration
     tensor_parallelism: int = 2,
@@ -107,7 +106,10 @@ def pretrain_config(
     )
 
     # Config Container
-    if mock:
+    # Determine dataset selection strategy.
+    _dataset_choice = dataset_type or "mock"
+
+    if _dataset_choice == "mock":
         # Use DatasetProvider path for mock VL dataset
         from megatron.bridge.recipes.qwen_vl.qwen25_vl_dataset import MockQwen25VLDatasetProvider
 
@@ -123,36 +125,39 @@ def pretrain_config(
             create_attention_mask=True,
             pad_to_max_length=True,
         )
+    elif _dataset_choice == "preloaded":
+        # Build from preloaded JSON/JSONL files using HF AutoProcessor conversation schema
+        dataset_cfg = PreloadedQwen25VLConversationProvider(
+            sequence_length=seq_length,
+            hf_processor_path=tokenizer_model,
+            train_data_path=train_data_path[0] if isinstance(train_data_path, list) else train_data_path,
+            valid_data_path=valid_data_path[0] if isinstance(valid_data_path, list) else valid_data_path,
+            test_data_path=test_data_path[0] if isinstance(test_data_path, list) else test_data_path,
+            image_folder=image_folder,
+            # Dataloader config parameters
+            num_workers=2,
+            dataloader_type="single",
+            data_sharding=True,
+            pin_memory=True,
+            persistent_workers=False,
+        )
+    elif _dataset_choice == "hf":
+        # Use HF-based VLM conversation dataset provider
+        dataset_cfg = HFDatasetConversationProvider(
+            sequence_length=seq_length,
+            hf_processor_path=tokenizer_model,
+            maker_name="make_rdr_dataset",
+            # Dataloader config parameters
+            num_workers=2,
+            dataloader_type="single",
+            data_sharding=True,
+            pin_memory=True,
+            persistent_workers=False,
+        )
     else:
-        if use_preloaded:
-            # Build from preloaded JSON/JSONL files using HF AutoProcessor conversation schema
-            dataset_cfg = PreloadedQwen25VLConversationProvider(
-                sequence_length=seq_length,
-                hf_processor_path=tokenizer_model,
-                train_data_path=train_data_path[0] if isinstance(train_data_path, list) else train_data_path,
-                valid_data_path=valid_data_path[0] if isinstance(valid_data_path, list) else valid_data_path,
-                test_data_path=test_data_path[0] if isinstance(test_data_path, list) else test_data_path,
-                image_folder=image_folder,
-                # Dataloader config parameters
-                num_workers=2,
-                dataloader_type="single",
-                data_sharding=True,
-                pin_memory=True,
-                persistent_workers=False,
-            )
-        else:
-            # Use HF-based VLM conversation dataset provider
-            dataset_cfg = HFDatasetConversationProvider(
-                sequence_length=seq_length,
-                hf_processor_path=tokenizer_model,
-                maker_name="make_rdr_dataset",
-                # Dataloader config parameters
-                num_workers=2,
-                dataloader_type="single",
-                data_sharding=True,
-                pin_memory=True,
-                persistent_workers=False,
-            )
+        raise ValueError(
+            f"Unsupported dataset_type '{_dataset_choice}'. Expected one of ['mock', 'preloaded', 'hf']."
+        )
 
     cfg = ConfigContainer(
         model=model_cfg,
