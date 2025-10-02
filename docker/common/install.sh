@@ -45,11 +45,21 @@ if [[ "$BASE_IMAGE" != "pytorch" && "$BASE_IMAGE" != "ubuntu" ]]; then
     exit 1
 fi
 
+# Function to monitor disk usage
+check_disk_space() {
+    echo "=== Disk Usage Check ==="
+    df -h /
+    echo "========================"
+}
+
 main() {
     if [[ -n "${PAT:-}" ]]; then
         echo -e "machine github.com\n  login token\n  password $PAT" >~/.netrc
         chmod 600 ~/.netrc
     fi
+
+    # Check initial disk space
+    check_disk_space
 
     # Install dependencies
     export DEBIAN_FRONTEND=noninteractive
@@ -64,7 +74,7 @@ main() {
     # Install tools
     apt-get update
     apt-get install -y wget curl git cmake
-
+    
     # Install CUDA
     if [[ "$BASE_IMAGE" == "ubuntu" ]]; then
         rm /etc/apt/sources.list.d/cuda*.list || true
@@ -78,6 +88,9 @@ main() {
 
     # Clean up
     apt-get clean
+    
+    # Check disk space after system installations
+    check_disk_space
 
     unset PIP_CONSTRAINT
 
@@ -129,6 +142,11 @@ main() {
         pip install --pre --no-cache-dir torch pybind11 wheel_stub ninja wheel packaging "setuptools>=77.0.0"
         pip install --pre --no-cache-dir --no-build-isolation .
     fi
+    
+    # Final cleanup and disk space check
+    rm -rf /tmp/* || true
+    rm -rf /var/tmp/* || true
+    check_disk_space
 
 }
 
