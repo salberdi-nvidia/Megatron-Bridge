@@ -42,6 +42,32 @@ jobs:
         arch: ["ubuntu-latest"]
         python-version: ["3.10", "3.11", "3.12"]
     steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          # this might remove tools that are actually needed,
+          # if set to "true" but frees about 6 GB
+          tool-cache: false
+          
+          # all of these default to true, but feel free to set to
+          # "false" if necessary for your workflow
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+
+      - name: Additional cleanup
+        run: |
+          # Remove additional unnecessary files to free up space
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo rm -rf /opt/hostedtoolcache || true
+          # Show available disk space
+          df -h
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
