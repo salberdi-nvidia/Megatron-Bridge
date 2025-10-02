@@ -1,3 +1,17 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
 Provider for datasets preloaded from JSON/JSONL files into conversation schema.
 """
@@ -12,10 +26,13 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from transformers import AutoProcessor
 
 from megatron.bridge.training.config import DatasetBuildContext, DatasetProvider
+
 from .dataset_provider import VLMConversationDataset
 
 
-def _split_text_by_placeholders(text: str, image_paths: List[str], video_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+def _split_text_by_placeholders(
+    text: str, image_paths: List[str], video_paths: Optional[List[str]] = None
+) -> List[Dict[str, Any]]:
     """
     Convert a legacy string containing "<image>"/"<video>" markers into a structured
     content list understood by HF processors: [{'type': 'image'|'video'|'text', ...}, ...].
@@ -26,7 +43,7 @@ def _split_text_by_placeholders(text: str, image_paths: List[str], video_paths: 
     cursor = 0
     for match in re.finditer(r"<image>|<video>", text):
         if match.start() > cursor:
-            segment = text[cursor:match.start()]
+            segment = text[cursor : match.start()]
             if segment:
                 parts.append({"type": "text", "text": segment})
         token = match.group(0)
@@ -201,5 +218,3 @@ class PreloadedQwen25VLConversationProvider(DatasetProvider):
         valid_ds = self._build_split_dataset(self.valid_data_path, context.valid_samples, processor)
         test_ds = self._build_split_dataset(self.test_data_path, context.test_samples, processor)
         return train_ds, valid_ds, test_ds
-
-

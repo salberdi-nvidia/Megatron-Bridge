@@ -112,5 +112,3 @@ def process_text_batch(
         )
 
     return batch
-
-

@@ -155,9 +155,7 @@ def pretrain_config(
             persistent_workers=False,
         )
     else:
-        raise ValueError(
-            f"Unsupported dataset_type '{_dataset_choice}'. Expected one of ['mock', 'preloaded', 'hf']."
-        )
+        raise ValueError(f"Unsupported dataset_type '{_dataset_choice}'. Expected one of ['mock', 'preloaded', 'hf'].")
 
     cfg = ConfigContainer(
         model=model_cfg,

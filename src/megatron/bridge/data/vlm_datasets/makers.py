@@ -1,3 +1,17 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
 Built-in maker functions that transform HuggingFace datasets into
 conversation-style examples consumable by VLM processors.
@@ -12,7 +26,9 @@ from datasets import load_dataset
 from .token_utils import json2token
 
 
-def make_rdr_dataset(path_or_dataset: str = "quintend/rdr-items", split: str = "train", **kwargs) -> List[Dict[str, Any]]:
+def make_rdr_dataset(
+    path_or_dataset: str = "quintend/rdr-items", split: str = "train", **kwargs
+) -> List[Dict[str, Any]]:
     """Load and preprocess the RDR dataset for image-to-text fine-tuning.
 
     Returns a list of examples with a "conversation" field that includes an image and text.
@@ -39,7 +55,9 @@ def make_rdr_dataset(path_or_dataset: str = "quintend/rdr-items", split: str = "
     return [format(example) for example in dataset]
 
 
-def make_cord_v2_dataset(path_or_dataset: str = "naver-clova-ix/cord-v2", split: str = "train", **kwargs) -> List[Dict[str, Any]]:
+def make_cord_v2_dataset(
+    path_or_dataset: str = "naver-clova-ix/cord-v2", split: str = "train", **kwargs
+) -> List[Dict[str, Any]]:
     """Load and preprocess the CORD-V2 dataset for image-to-text fine-tuning."""
     dataset = load_dataset(path_or_dataset, split=split)
 
@@ -70,7 +88,9 @@ def make_cord_v2_dataset(path_or_dataset: str = "naver-clova-ix/cord-v2", split:
     return [format(example) for example in dataset]
 
 
-def make_medpix_dataset(path_or_dataset: str = "medpix-dataset/medpix-dataset", split: str = "train", **kwargs) -> List[Dict[str, Any]]:
+def make_medpix_dataset(
+    path_or_dataset: str = "medpix-dataset/medpix-dataset", split: str = "train", **kwargs
+) -> List[Dict[str, Any]]:
     """Load and preprocess the MedPix dataset for image-to-text fine-tuning."""
     dataset = load_dataset(path_or_dataset, split=split)
 
@@ -91,7 +111,9 @@ def make_medpix_dataset(path_or_dataset: str = "medpix-dataset/medpix-dataset", 
     return [format(example) for example in dataset]
 
 
-def make_cv17_dataset(path_or_dataset: str = "ysdede/commonvoice_17_tr_fixed", split: str = "train", **kwargs) -> List[Dict[str, Any]]:
+def make_cv17_dataset(
+    path_or_dataset: str = "ysdede/commonvoice_17_tr_fixed", split: str = "train", **kwargs
+) -> List[Dict[str, Any]]:
     """Load and preprocess the CommonVoice 17 dataset for audio-to-text fine-tuning."""
     dataset = load_dataset(path_or_dataset, split=split)
     all_columns = dataset.column_names
@@ -108,5 +130,3 @@ def make_cv17_dataset(path_or_dataset: str = "ysdede/commonvoice_17_tr_fixed", s
         }
 
     return [format(example) for example in dataset]
-
-

@@ -1,11 +1,24 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
 Collation utilities for building VLM training batches from conversation examples.
 """
 
-from PIL import Image  # noqa: F401  # may be used downstream by processors
-import torch.nn.functional as F
-
 import torch
+import torch.nn.functional as F
+from PIL import Image  # noqa: F401  # may be used downstream by processors
 
 from .token_utils import extract_skipped_token_ids
 
@@ -95,7 +108,9 @@ def _gather_assistant_text_segments(example: dict) -> list[str]:
     return texts
 
 
-def create_multiturn_loss_mask_by_search(example: dict, input_ids, processor, skipped_tokens: torch.Tensor) -> list[int]:
+def create_multiturn_loss_mask_by_search(
+    example: dict, input_ids, processor, skipped_tokens: torch.Tensor
+) -> list[int]:
     """Tokenizer-agnostic masking via substring search of assistant texts.
 
     - Tokenize full conversation with processor already done -> input_ids
@@ -326,5 +341,3 @@ COLLATE_FNS = {
     "Qwen2_5_VLProcessor": qwen2_5_collate_fn,
     "default": default_collate_fn,
 }
-
-

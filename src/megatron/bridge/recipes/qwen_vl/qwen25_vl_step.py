@@ -22,11 +22,9 @@ from megatron.core.models.gpt import GPTModel
 from megatron.core.utils import get_batch_on_this_cp_rank, get_model_config
 
 from megatron.bridge.training.config import ConfigContainer
-from megatron.bridge.training.gpt_step import (
-    _create_loss_function,
-    get_packed_seq_params,
-)
 from megatron.bridge.training.state import GlobalState
+from megatron.bridge.training.utils.loss_utils import create_loss_function as _create_loss_function
+from megatron.bridge.training.utils.packed_seq_utils import get_packed_seq_params
 
 
 logger = logging.getLogger(__name__)
@@ -80,13 +78,6 @@ def get_batch_from_iterator(
             _batch_required_keys[key] = None
 
     return _batch_required_keys
-
-
-def get_batch_on_this_tp_rank(*args, **kwargs):
-    # Re-export the shared implementation for backward compatibility
-    from megatron.bridge.training.gpt_step import get_batch_on_this_tp_rank as _shared_get_batch_on_this_tp_rank
-
-    return _shared_get_batch_on_this_tp_rank(*args, **kwargs)
 
 
 def get_batch(
