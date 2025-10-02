@@ -55,7 +55,7 @@ def model_config(
     recompute_modules: Optional[List[str]] = None,
     recompute_method: Optional[str] = None,
     recompute_num_layers: Optional[int] = None,
-    enable_deepep: bool = False,
+    enable_deepep: bool = True,
     apply_rope_fusion: bool = True,
 ) -> DeepSeekV3Provider:
     """
@@ -177,7 +177,7 @@ def pretrain_config(
     # Precision recipe
     precision_config: Optional[Union[MixedPrecisionConfig, str]] = None,
     comm_overlap_config: Optional[CommOverlapConfig] = None,
-    enable_deepep: bool = False,
+    enable_deepep: bool = True,
     # Recomputation
     recompute_granularity: str = "selective",
     recompute_modules: Optional[List[str]] = None,
