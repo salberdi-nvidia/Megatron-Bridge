@@ -538,15 +538,15 @@ class TestTransposeMapping:
         """Test basic transpose functionality from HF to Megatron."""
         mock_distributed_env()
         mapping = TransposeMapping("transpose.weight", "hf.weight", dims=(1, 0))
-        
+
         # Create a test tensor [4, 8]
         hf_weight = torch.randn(4, 8)
         megatron_module = MockModule(transformer_config, weight_shape=(8, 4))
-        
+
         with patch.object(mapping._tp_mapping, "hf_to_megatron") as mock_hf_to_megatron:
             mock_hf_to_megatron.return_value = torch.randn(8, 4)
             result = mapping.hf_to_megatron(hf_weight, megatron_module)
-            
+
             # Verify the tensor was transposed before being passed to AutoMapping
             mock_hf_to_megatron.assert_called_once()
             transposed_tensor = mock_hf_to_megatron.call_args[0][0]
@@ -558,16 +558,16 @@ class TestTransposeMapping:
         """Test basic transpose functionality from Megatron to HF."""
         mock_distributed_env()
         mapping = TransposeMapping("transpose.weight", "hf.weight", dims=(1, 0))
-        
+
         # Create a test tensor [8, 4]
         megatron_weight = torch.randn(8, 4)
         megatron_module = MockModule(transformer_config, weight_shape=(8, 4))
-        
+
         with patch.object(mapping._tp_mapping, "megatron_to_hf") as mock_megatron_to_hf:
             # Mock AutoMapping to return the tensor under the megatron_param key
             mock_megatron_to_hf.return_value = {"transpose.weight": megatron_weight}
             result = mapping.megatron_to_hf(megatron_weight, megatron_module)
-            
+
             # Verify the result is transposed back
             assert "hf.weight" in result
             expected_transposed = torch.permute(megatron_weight, (1, 0))
@@ -577,16 +577,16 @@ class TestTransposeMapping:
     def test_transpose_with_different_dims(self, mock_distributed_env, transformer_config):
         """Test transpose with different dimension permutations."""
         mock_distributed_env()
-        
+
         # Test 3D tensor transpose
         mapping = TransposeMapping("transpose.weight", "hf.weight", dims=(2, 0, 1))
         hf_weight = torch.randn(2, 3, 4)  # [2, 3, 4]
         megatron_module = MockModule(transformer_config, weight_shape=(4, 2, 3))
-        
+
         with patch.object(mapping._tp_mapping, "hf_to_megatron") as mock_hf_to_megatron:
             mock_hf_to_megatron.return_value = torch.randn(4, 2, 3)
             mapping.hf_to_megatron(hf_weight, megatron_module)
-            
+
             # Verify the tensor was permuted correctly
             transposed_tensor = mock_hf_to_megatron.call_args[0][0]
             expected_shape = (4, 2, 3)  # dims=(2, 0, 1) applied to (2, 3, 4)
@@ -596,15 +596,15 @@ class TestTransposeMapping:
         """Test TransposeMapping with tensor parallelism."""
         mock_mpu, mock_dist = mock_distributed_env(tp_size=2, tp_rank=0)
         mapping = TransposeMapping("transpose.weight", "hf.weight", dims=(1, 0))
-        
+
         hf_weight = torch.randn(4, 8)
         megatron_module = MockModule(transformer_config, weight_shape=(4, 4))  # Each rank gets half
-        
+
         # Mock the AutoMapping's TP behavior
         with patch.object(mapping._tp_mapping, "hf_to_megatron") as mock_hf_to_megatron:
             mock_hf_to_megatron.return_value = torch.randn(4, 4)
             result = mapping.hf_to_megatron(hf_weight, megatron_module)
-            
+
             # Verify transpose happened before TP distribution
             mock_hf_to_megatron.assert_called_once()
             transposed_tensor = mock_hf_to_megatron.call_args[0][0]
@@ -614,16 +614,16 @@ class TestTransposeMapping:
         """Test TransposeMapping gathering from multiple TP ranks."""
         mock_distributed_env(tp_size=2, tp_rank=0)
         mapping = TransposeMapping("transpose.weight", "hf.weight", dims=(1, 0))
-        
+
         megatron_weight = torch.randn(4, 4)  # Shard from current rank
         megatron_module = MockModule(transformer_config, weight_shape=(4, 4))
-        
+
         # Mock AutoMapping to return gathered tensor
         full_gathered = torch.randn(8, 4)  # Full tensor after TP gathering
         with patch.object(mapping._tp_mapping, "megatron_to_hf") as mock_megatron_to_hf:
             mock_megatron_to_hf.return_value = {"transpose.weight": full_gathered}
             result = mapping.megatron_to_hf(megatron_weight, megatron_module)
-            
+
             # Verify the gathered tensor was transposed back
             assert "hf.weight" in result
             expected_shape = (4, 8)  # Transposed from (8, 4)
@@ -633,15 +633,15 @@ class TestTransposeMapping:
         """Test TransposeMapping handles empty results from AutoMapping."""
         mock_distributed_env()
         mapping = TransposeMapping("transpose.weight", "hf.weight", dims=(1, 0))
-        
+
         megatron_weight = torch.randn(8, 4)
         megatron_module = MockModule(transformer_config, weight_shape=(8, 4))
-        
+
         # Mock AutoMapping to return empty dict (e.g., from non-rank-0 in TP)
         with patch.object(mapping._tp_mapping, "megatron_to_hf") as mock_megatron_to_hf:
             mock_megatron_to_hf.return_value = {}
             result = mapping.megatron_to_hf(megatron_weight, megatron_module)
-            
+
             # Should return empty dict without error
             assert result == {}
 
@@ -649,7 +649,7 @@ class TestTransposeMapping:
         """Test TransposeMapping wildcard pattern resolution."""
         mock_distributed_env()
         mapping = TransposeMapping("layer.*.transpose.weight", "model.*.hf.weight", dims=(1, 0))
-        
+
         # Test resolve method
         resolved = mapping.resolve(("0",))
         assert resolved.megatron_param == "layer.0.transpose.weight"
@@ -661,14 +661,14 @@ class TestTransposeMapping:
         """Test TransposeMapping on non-rank-0 during HF to Megatron conversion."""
         mock_distributed_env(tp_size=2, tp_rank=1)  # Non-rank-0
         mapping = TransposeMapping("transpose.weight", "hf.weight", dims=(1, 0))
-        
+
         hf_weight = torch.randn(4, 8)
         megatron_module = MockModule(transformer_config, weight_shape=(4, 4))
-        
+
         with patch.object(mapping._tp_mapping, "hf_to_megatron") as mock_hf_to_megatron:
             mock_hf_to_megatron.return_value = torch.randn(4, 4)
             mapping.hf_to_megatron(hf_weight, megatron_module)
-            
+
             # On non-rank-0, None should be passed to AutoMapping
             mock_hf_to_megatron.assert_called_once()
             passed_tensor = mock_hf_to_megatron.call_args[0][0]
@@ -678,14 +678,14 @@ class TestTransposeMapping:
         """Test TransposeMapping with identity permutation."""
         mock_distributed_env()
         mapping = TransposeMapping("transpose.weight", "hf.weight", dims=(0, 1))  # Identity
-        
+
         hf_weight = torch.randn(4, 8)
         megatron_module = MockModule(transformer_config, weight_shape=(4, 8))
-        
+
         with patch.object(mapping._tp_mapping, "hf_to_megatron") as mock_hf_to_megatron:
             mock_hf_to_megatron.return_value = hf_weight.clone()
             mapping.hf_to_megatron(hf_weight, megatron_module)
-            
+
             # Even with identity permutation, tensor should be passed through
             transposed_tensor = mock_hf_to_megatron.call_args[0][0]
             assert torch.equal(transposed_tensor, hf_weight)  # Should be unchanged
@@ -694,16 +694,16 @@ class TestTransposeMapping:
         """Test TransposeMapping with higher dimensional tensors."""
         mock_distributed_env()
         mapping = TransposeMapping("transpose.weight", "hf.weight", dims=(3, 1, 0, 2))
-        
+
         # 4D tensor
         hf_weight = torch.randn(2, 3, 4, 5)  # [2, 3, 4, 5]
         expected_shape = (5, 3, 2, 4)  # After permutation (3, 1, 0, 2)
         megatron_module = MockModule(transformer_config, weight_shape=expected_shape)
-        
+
         with patch.object(mapping._tp_mapping, "hf_to_megatron") as mock_hf_to_megatron:
             mock_hf_to_megatron.return_value = torch.randn(*expected_shape)
             mapping.hf_to_megatron(hf_weight, megatron_module)
-            
+
             transposed_tensor = mock_hf_to_megatron.call_args[0][0]
             assert transposed_tensor.shape == expected_shape
 
@@ -711,7 +711,7 @@ class TestTransposeMapping:
         """Test that TransposeMapping properly delegates to AutoMapping."""
         mock_distributed_env()
         mapping = TransposeMapping("transpose.weight", "hf.weight", dims=(1, 0))
-        
+
         # Verify that the internal AutoMapping is created with correct parameters
         assert mapping._tp_mapping.megatron_param == "transpose.weight"
         assert mapping._tp_mapping.hf_param == "transpose.weight"
