@@ -21,21 +21,21 @@ from megatron.bridge.models.conversion.param_mapping import (
 )
 import torch
 from megatron.bridge.models.hf_pretrained.causal_lm import PreTrainedCausalLM
-from megatron.bridge.models.gemma.gemma_provider import GemmaModelProvider
+from megatron.bridge.models.gemma.gemma3_provider import Gemma3ModelProvider
 from transformers import Gemma3ForCausalLM
 from megatron.core.models.gpt.gpt_model import GPTModel
 import math
 from transformers import AutoConfig
 
 @MegatronModelBridge.register_bridge(source=Gemma3ForCausalLM, target=GPTModel)
-class GemmaModelBridge(MegatronModelBridge):
+class Gemma3ModelBridge(MegatronModelBridge):
 
-    def provider_bridge(self, hf_pretrained: PreTrainedCausalLM) -> GemmaModelProvider:
+    def provider_bridge(self, hf_pretrained: PreTrainedCausalLM) -> Gemma3ModelProvider:
         hf_config = hf_pretrained.config
         # Precision config is stored in the VL Config
         hf_vl_config = AutoConfig.from_pretrained(hf_pretrained._model_name_or_path)
 
-        provider = GemmaModelProvider(
+        provider = Gemma3ModelProvider(
             init_method_std=hf_config.initializer_range,
             hidden_size=hf_config.hidden_size,
             ffn_hidden_size=hf_config.intermediate_size,
