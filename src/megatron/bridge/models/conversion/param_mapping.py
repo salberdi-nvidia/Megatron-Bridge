@@ -960,7 +960,6 @@ class ReplicatedMapping(MegatronParamMapping[torch.Tensor]):
         except AttributeError:
             # the parameter may not be called "weight"
             target_device = next(megatron_module.parameters()).device
-        print(f"{self.hf_param=} {target_device=}")
         hf_weights = hf_weights.to(device=target_device)
         if self.tp_size == 1:
             return hf_weights

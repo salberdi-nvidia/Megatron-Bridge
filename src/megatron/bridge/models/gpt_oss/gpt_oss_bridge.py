@@ -24,15 +24,11 @@ from megatron.bridge.models.conversion.mapping_registry import MegatronMappingRe
 from megatron.bridge.models.conversion.model_bridge import MegatronModelBridge, WeightConversionTask
 from megatron.bridge.models.conversion.param_mapping import (
     AutoMapping,
-    MegatronParamMapping,
     QKVMapping,
 )
 from megatron.bridge.models.gpt_oss.gpt_oss_provider import GPTOSSProvider
 from megatron.bridge.models.hf_pretrained.causal_lm import PreTrainedCausalLM
 from megatron.bridge.utils.common_utils import extract_expert_number_from_param
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 @MegatronModelBridge.register_bridge(source=GptOssForCausalLM, target=GPTModel)
 class GPTOSSBridge(MegatronModelBridge):

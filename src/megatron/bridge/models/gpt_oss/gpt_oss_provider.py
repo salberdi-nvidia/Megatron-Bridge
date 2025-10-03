@@ -18,7 +18,6 @@ from typing import Callable, List, Literal, Optional, Tuple, Union
 
 from megatron.bridge.models.gpt_provider import GPTModelProvider
 from megatron.core.fusions.fused_bias_geglu import quick_gelu
-from megatron.core.transformer.enums import AttnBackend
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +42,13 @@ class GPTOSSProvider(GPTModelProvider):
 
     position_embedding_type: str = "yarn"
     rotary_base: int = 150000
-    rotary_scaling_factor: float = 32.
-    yarn_original_max_position_embeddings: int = 131072
+    yarn_rotary_scaling_factor: float = 32.
+    yarn_original_max_position_embeddings: int = 4096
     yarn_beta_fast: float = 32.
     yarn_beta_slow: float = 1.
     yarn_correction_range_round_to_int: bool = False
+    yarn_mscale: float = 1.0
+    yarn_mscale_all_dim: float = 1.0
 
     moe_router_topk: int = 4
     moe_router_pre_softmax: bool = False
@@ -64,7 +65,6 @@ class GPTOSSProvider(GPTModelProvider):
     bias_activation_fusion: bool = True
     bias_dropout_fusion: bool = False
     window_attn_skip_freq: Optional[Union[int, List[int]]] = 2  # alternative SWA/full
-    attention_backend: AttnBackend = AttnBackend.local  # currently only "local" is supported
     activation_func_clamp_value: Optional[float] = 7.0
 
 @dataclass
