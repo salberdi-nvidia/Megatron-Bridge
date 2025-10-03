@@ -441,14 +441,6 @@ def training_log(
                 history_wct=history_wct,
                 window_size=logger_config.throughput_window_size,
             )
-            num_flops = num_floating_point_operations(config, batch_size)
-            # elapsed_time = timers("interval-time").elapsed()
-            # elapsed_time_per_iteration = elapsed_time / total_iterations
-            # num_tflops = num_flops / elapsed_time_per_iteration / 1e12
-            # num_tflops_per_gpu = num_tflops / get_world_size_safe()
-
-            # throughput_report["throughput/tflops"] = num_tflops
-            # throughput_report["throughput/tflops/device"] = num_tflops_per_gpu
 
             if wandb_writer and logger_config.log_throughput_to_wandb:
                 wandb_writer.log(throughput_report, iteration)
@@ -567,6 +559,16 @@ def training_log(
         num_flops = num_floating_point_operations(config, batch_size)
         per_gpu_tf = num_flops / elapsed_time_per_iteration / get_world_size_safe() / 1e12
         print_rank_0(f"Step Time : {elapsed_time_per_iteration:.2f}s GPU utilization: {per_gpu_tf:.1f}TFLOP/s/GPU")
+
+        if logger_config.log_throughput_to_tensorboard:
+            if writer:
+                writer.add_scalar("throughput/tflops/device", per_gpu_tf, iteration)
+                writer.add_scalar("throughput/tflops", per_gpu_tf * get_world_size_safe(), iteration)
+        
+        if logger_config.log_throughput_to_wandb:
+            if wandb_writer:
+                wandb_writer.log({"throughput/tflops/device": per_gpu_tf}, iteration)
+                wandb_writer.log({"throughput/tflops": per_gpu_tf * get_world_size_safe()}, iteration)
 
         if logger_config.log_timers_to_tensorboard:
             if writer:
