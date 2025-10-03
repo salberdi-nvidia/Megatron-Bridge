@@ -89,8 +89,6 @@ def main():
             recipe.model.recompute_modules = ["mla_up_proj", "mlp"]
         elif args.gpu.lower() in ["gb200"]:
             recipe.model.recompute_modules = ["mla_up_proj", "mlp", "moe_act"]
-            recipe.dataset.num_workers = 0
-            recipe.dataset.pin_memory = False
         if args.gpu.lower() in ["gb200", "b200"]:
             recipe.comm_overlap.overlap_grad_reduce = True
         elif args.gpu.lower() in ["h100"]:
@@ -169,6 +167,10 @@ def main():
             if args.model_size in ["8b", "70b"]:
                recipe.model.gradient_accumulation_fusion = False
     recipe.model.apply_rope_fusion = True
+
+    if args.model_name == "deepseek" and args.model_size == "v3" and args.gpu.lower() in ["gb200"]:
+        recipe.dataset.num_workers = 0
+        recipe.dataset.pin_memory = False
 
     pretrain(config=recipe, forward_step_func=forward_step)
 
