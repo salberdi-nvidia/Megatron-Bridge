@@ -224,7 +224,6 @@ class TestLoRAFinetune:
             seq_length=seq_length,
             tensor_model_parallel_size=tensor_parallel_size,
             pipeline_model_parallel_size=pipeline_parallel_size,
-            pipeline_dtype=torch.bfloat16,
             sequence_parallel=(tensor_parallel_size > 1),
         )
 
@@ -242,8 +241,6 @@ class TestLoRAFinetune:
         """Create an optimizer configuration."""
         return OptimizerConfig(
             optimizer="adam",
-            bf16=True,
-            fp16=False,
             adam_beta1=0.9,
             adam_beta2=0.95,
             adam_eps=1e-5,
