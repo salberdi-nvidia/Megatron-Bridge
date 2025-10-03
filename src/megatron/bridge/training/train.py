@@ -281,7 +281,6 @@ def train(
         )
         fault_tolerance.on_training_step_end(global_state)
         history_wct.append(time.time() - global_state.start_time)
-        print(history_wct)
         if should_checkpoint:
             save_checkpoint_and_time(
                 global_state,
