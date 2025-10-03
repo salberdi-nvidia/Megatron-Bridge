@@ -100,7 +100,6 @@ class Qwen25VLModel(MegatronModule):
         self.vp_stage = vp_stage
 
         if pre_process:
-            config.vision_config._attn_implementation = "flash_attention_2"
             self.visual = Qwen2_5_VisionTransformerPretrainedModel._from_config(config.vision_config)
             # Ensure HF visual tower params are marked for TP grad sync and future assignments are hooked.
             hook_hf_module_setattr_for_tp_grad_sync(self.visual)

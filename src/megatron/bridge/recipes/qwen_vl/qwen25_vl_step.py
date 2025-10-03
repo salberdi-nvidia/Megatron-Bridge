@@ -17,6 +17,7 @@ from functools import partial
 from typing import Iterable
 
 import torch
+import torch.nn.functional as F
 from megatron.core import parallel_state
 from megatron.core.models.gpt import GPTModel
 from megatron.core.utils import get_batch_on_this_cp_rank, get_model_config
@@ -124,8 +125,102 @@ def get_batch(
     if image_grid_thw is not None:
         batch["image_grid_thw"] = image_grid_thw
 
+    # Helpers to pad/truncate to a desired target length with an upper cap
+    def _pad_or_truncate_2d_to_len(
+        x: torch.Tensor | None, target_len: int, max_cap: int, pad_value: int | float
+    ) -> torch.Tensor | None:
+        if x is None:
+            return None
+        cur = x.size(1)
+        if cur < target_len:
+            return F.pad(x, (0, target_len - cur), value=pad_value)
+        if cur > max_cap:
+            return x[:, :max_cap]
+        return x
+
+    def _pad_or_truncate_pos_to_len(
+        pos: torch.Tensor | None, target_len: int, max_cap: int
+    ) -> torch.Tensor | None:
+        if pos is None:
+            return None
+        cur = pos.size(1)
+        if cur < target_len:
+            add = (
+                torch.arange(cur, target_len, device=pos.device, dtype=pos.dtype)
+                .unsqueeze(0)
+                .expand(pos.size(0), -1)
+            )
+            return torch.cat([pos, add], dim=1)
+        if cur > max_cap:
+            return pos[:, :max_cap]
+        return pos
+
+    def _pad_or_truncate_attn_to_len(
+        mask: torch.Tensor | None, target_len: int, max_cap: int
+    ) -> torch.Tensor | None:
+        if mask is None:
+            return None
+        # Expected shape (B, 1, S, S)
+        b, h, s1, s2 = mask.shape
+        pad_val = False if mask.dtype == torch.bool else 0
+        if s1 < target_len:
+            return F.pad(mask, (0, target_len - s2, 0, target_len - s1), value=pad_val)
+        if s1 > max_cap:
+            return mask[:, :, :max_cap, :max_cap]
+        return mask
+
+    # When using pipeline parallelism, ensure fixed shapes equal to cfg.model.seq_length
+    if getattr(cfg.model, "pipeline_model_parallel_size", 1) > 1:
+        seq_len = cfg.model.seq_length
+
+        tokens_or_input = batch.get("tokens") if batch.get("tokens") is not None else batch.get("input_ids")
+        tokens_or_input = _pad_or_truncate_2d_to_len(tokens_or_input, seq_len, seq_len, pad_value=0)
+        if batch.get("tokens") is not None:
+            batch["tokens"] = tokens_or_input  # type: ignore[assignment]
+        else:
+            batch["input_ids"] = tokens_or_input  # type: ignore[assignment]
+        batch["labels"] = _pad_or_truncate_2d_to_len(batch.get("labels"), seq_len, seq_len, pad_value=-100)  # type: ignore[assignment]
+        batch["loss_mask"] = _pad_or_truncate_2d_to_len(batch.get("loss_mask"), seq_len, seq_len, pad_value=0)  # type: ignore[assignment]
+        batch["position_ids"] = _pad_or_truncate_pos_to_len(batch.get("position_ids"), seq_len, seq_len)  # type: ignore[assignment]
+        if batch.get("attention_mask") is not None:
+            batch["attention_mask"] = _pad_or_truncate_attn_to_len(batch.get("attention_mask"), seq_len, seq_len)  # type: ignore[assignment]
+    else:
+        # No PP: pad sequence length to nearest multiple of 64 for efficiency (capped at model seq_length)
+        seq_cap = cfg.model.seq_length
+
+        def _ceil_to_mult(n: int, mult: int) -> int:
+            return ((n + mult - 1) // mult) * mult
+
+        tokens_or_input = batch.get("tokens") if batch.get("tokens") is not None else batch.get("input_ids")
+        if tokens_or_input is not None:
+            cur_len = tokens_or_input.size(1)
+            target_len = min(seq_cap, _ceil_to_mult(cur_len, 64))
+
+            # tokens/input_ids
+            padded_tokens = _pad_or_truncate_2d_to_len(tokens_or_input, target_len, seq_cap, pad_value=0)
+            if batch.get("tokens") is not None:
+                batch["tokens"] = padded_tokens  # type: ignore[assignment]
+            else:
+                batch["input_ids"] = padded_tokens  # type: ignore[assignment]
+
+            # labels and loss mask
+            batch["labels"] = _pad_or_truncate_2d_to_len(batch.get("labels"), target_len, seq_cap, pad_value=-100)  # type: ignore[assignment]
+            batch["loss_mask"] = _pad_or_truncate_2d_to_len(batch.get("loss_mask"), target_len, seq_cap, pad_value=0)  # type: ignore[assignment]
+
+            # position_ids: extend with increasing positions
+            pos = batch.get("position_ids")
+            pos = _pad_or_truncate_pos_to_len(pos, target_len, seq_cap)
+            if pos is not None:
+                batch["position_ids"] = pos  # type: ignore[assignment]
+
+            # attention_mask if present
+            attn = batch.get("attention_mask")
+            if attn is not None:
+                attn = _pad_or_truncate_attn_to_len(attn, target_len, seq_cap)
+                batch["attention_mask"] = attn  # type: ignore[assignment]
+
     return (
-        batch.get("tokens") if batch.get("tokens") is not None else batch.get("input_ids"),
+        (batch.get("tokens") if batch.get("tokens") is not None else batch.get("input_ids")),
         batch["labels"],
         batch["loss_mask"],
         batch["attention_mask"],
