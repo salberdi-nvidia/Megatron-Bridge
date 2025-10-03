@@ -1707,3 +1707,7 @@ class TransposeMapping(MegatronParamMapping[torch.Tensor]):
         permuted_back = torch.permute(gathered_tensor, self.dims)
         
         return {str(self.hf_param): permuted_back}
+    
+    def resolve(self, captures: Tuple[str, ...]) -> "MegatronParamMapping":
+        resolved_megatron_param, resolved_hf_param = self._resolve_names(captures)
+        return type(self)(resolved_megatron_param, resolved_hf_param, self.dims)
