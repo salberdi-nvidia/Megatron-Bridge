@@ -577,7 +577,7 @@ class TestGemma3ModelProviderIntegration:
         for provider in providers:
             assert isinstance(provider, Gemma3ModelProvider)
 
-    def test_unique_27b_features(self):
+    def test_softmax_scale_configuration(self):
         """Test features unique to the 27B model."""
         provider_27b = Gemma3ModelProvider27B()
         
@@ -586,7 +586,7 @@ class TestGemma3ModelProviderIntegration:
         expected_scale = 1.0 / math.sqrt(168)
         assert abs(provider_27b.softmax_scale - expected_scale) < 1e-10
         
-        # Other models don't have this attribute
+        # Other models have this attribute set to 1.0 / math.sqrt(256)
         other_providers = [
             Gemma3ModelProvider1B(),
             Gemma3ModelProvider4B(),
@@ -594,5 +594,6 @@ class TestGemma3ModelProviderIntegration:
         ]
         
         for provider in other_providers:
-            # They inherit from base class which doesn't have softmax_scale
-            assert not hasattr(provider, 'softmax_scale') or provider.softmax_scale is None
+            assert hasattr(provider, 'softmax_scale')
+            expected_scale = 1.0 / math.sqrt(256)
+            assert abs(provider.softmax_scale - expected_scale) < 1e-10

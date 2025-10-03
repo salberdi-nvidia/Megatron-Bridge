@@ -74,6 +74,7 @@ class Gemma3ModelProvider(GPTModelProvider):
     rope_scaling_factor: float = 1.0
     # Disable cuDNN attention since TE 1.8 does not support head dim > 128
     attention_backend: AttnBackend = AttnBackend.flash
+    softmax_scale: float = 1.0 / math.sqrt(256)
 
     # mlp
     gated_linear_unit: bool = True
