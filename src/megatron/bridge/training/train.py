@@ -50,7 +50,6 @@ from megatron.bridge.training.nvrx_straggler import (
 )
 from megatron.bridge.training.state import GlobalState
 from megatron.bridge.training.utils import flop_utils
-from megatron.bridge.training.callbacks import RuntimeEstimator
 from megatron.bridge.training.utils.log_utils import append_to_progress_log, barrier_and_log
 from megatron.bridge.training.utils.train_utils import (
     calc_params_l2_norm,
