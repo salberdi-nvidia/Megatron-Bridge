@@ -442,8 +442,11 @@ def training_log(
                 window_size=logger_config.throughput_window_size,
             )
             num_flops = num_floating_point_operations(config, batch_size)
-            per_gpu_tf = num_flops / elapsed_time_per_iteration / get_world_size_safe() / 1e12
-            throughput_report["throughput/tflops/device"] = per_gpu_tf
+            num_tflops = num_flops / elapsed_time_per_iteration / 1e12
+            num_tflops_per_gpu = num_tflops / get_world_size_safe()
+
+            throughput_report["throughput/tflops"] = num_tflops
+            throughput_report["throughput/tflops/device"] = num_tflops_per_gpu
 
             if wandb_writer and logger_config.log_throughput_to_wandb:
                 wandb_writer.log(throughput_report, iteration)
