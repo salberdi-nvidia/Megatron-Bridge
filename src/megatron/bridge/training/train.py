@@ -277,9 +277,6 @@ def train(
 
         # Run training step.
         fault_tolerance.on_training_step_start(global_state)
-        for callback in config.logger.callbacks:
-            if isinstance(callback, RuntimeEstimator):
-                callback.track_start(global_state.train_state.step, config.train.train_iters)
         loss_dict, skipped_iter, should_checkpoint, should_exit, exit_code, grad_norm, num_zeros_in_grad = train_step(
             forward_step_func, num_fw_args, train_data_iterator, model, optimizer, scheduler, global_state
         )
