@@ -21,16 +21,16 @@ both YAML configuration files and command-line overrides using Hydra-style synta
 
 Examples:
     Basic usage with default configuration:
-        $ python pretrain_llama3_8b.py
+        $ torchrun --nproc_per_node=8 pretrain_llama3_8b.py
 
     Using a custom YAML config file:
-        $ python pretrain_llama3_8b.py --config-file my_custom_config.yaml
+        $ torchrun --nproc_per_node=8 pretrain_llama3_8b.py --config-file my_custom_config.yaml
 
     Using CLI overrides only:
-        $ python pretrain_llama3_8b.py model.tensor_model_parallel_size=4 train.train_iters=100000
+        $ torchrun --nproc_per_node=8 pretrain_llama3_8b.py model.tensor_model_parallel_size=4 train.train_iters=100000
 
     Combining YAML and CLI overrides (CLI takes precedence):
-        $ python pretrain_llama3_8b.py --config-file conf/my_config.yaml \
+        $ torchrun --nproc_per_node=8 pretrain_llama3_8b.py --config-file conf/my_config.yaml \
         model.pipeline_dtype=torch.float16 \
         train.global_batch_size=512
 
@@ -55,9 +55,10 @@ import sys
 from pathlib import Path
 from typing import Tuple
 
+import torch
 from omegaconf import OmegaConf
 
-from megatron.bridge.recipes.llama.llama3_8b import pretrain_config
+from megatron.bridge.recipes.llama import llama3_8b_pretrain_config as pretrain_config
 from megatron.bridge.training.config import ConfigContainer
 from megatron.bridge.training.gpt_step import forward_step
 from megatron.bridge.training.pretrain import pretrain
@@ -66,6 +67,7 @@ from megatron.bridge.training.utils.omegaconf_utils import (
     create_omegaconf_dict_config,
     parse_hydra_overrides,
 )
+from megatron.bridge.utils.common_utils import get_rank_safe
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -113,13 +115,13 @@ def main() -> None:
 
     Examples of CLI usage:
         # Use default config with custom learning rate
-        python pretrain_llama3_8b.py optimizer.lr=0.0002
+        torchrun --nproc_per_node=8 pretrain_llama3_8b.py optimizer.lr=0.0002
 
         # Custom config file with additional overrides
-        python pretrain_llama3_8b.py --config-file my_config.yaml train.train_iters=50000
+        torchrun --nproc_per_node=8 pretrain_llama3_8b.py --config-file my_config.yaml train.train_iters=50000
 
         # Multiple overrides for distributed training
-        python pretrain_llama3_8b.py \
+        torchrun --nproc_per_node=8 pretrain_llama3_8b.py \
             model.tensor_model_parallel_size=4 \
             model.pipeline_model_parallel_size=2 \
             train.global_batch_size=512
@@ -132,7 +134,10 @@ def main() -> None:
     # Load base configuration from the recipe as a Python dataclass
     cfg: ConfigContainer = pretrain_config()
     logger.info("Loaded base configuration")
-    cfg.to_yaml()
+
+    # Print configuration on rank 0
+    if get_rank_safe() == 0:
+        cfg.print_yaml()
 
     # Convert the initial Python dataclass to an OmegaConf DictConfig for merging
     merged_omega_conf, excluded_fields = create_omegaconf_dict_config(cfg)
@@ -160,13 +165,19 @@ def main() -> None:
     apply_overrides(cfg, final_overrides_as_dict, excluded_fields)
 
     # Display final configuration
-    logger.info("--- Final Merged Configuration ---")
-    cfg.to_yaml()
-    logger.info("----------------------------------")
+    if get_rank_safe() == 0:
+        logger.info("--- Final Merged Configuration ---")
+        cfg.print_yaml()
+        logger.info("----------------------------------")
 
     # Start training
     logger.debug("Starting pretraining...")
     pretrain(config=cfg, forward_step_func=forward_step)
+
+    # Cleanup process group
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
+        torch.distributed.destroy_process_group()
 
 
 if __name__ == "__main__":

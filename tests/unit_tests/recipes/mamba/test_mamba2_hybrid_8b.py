@@ -114,7 +114,7 @@ class TestPretrainConfig:
         assert isinstance(config.model, NVIDIAMambaHybridProvider8B)
 
         # Check training configuration
-        assert config.train.train_iters == 100
+        assert config.train.train_iters == 1_168_251
         assert config.train.global_batch_size == 8
         assert config.train.micro_batch_size == 1
         assert config.train.eval_interval == 100
@@ -153,7 +153,7 @@ class TestPretrainConfig:
         assert config.optimizer.lr == 1e-4
         assert config.optimizer.min_lr == 1e-5
         assert config.scheduler.lr_warmup_iters == 1000  # Note: fixed in scheduler config
-        assert config.scheduler.lr_decay_iters == 10000  # Should match train_iters
+        assert config.scheduler.lr_decay_iters is None  # Will be set to train_iters during validation
 
     def test_pretrain_config_custom_model_parameters(self):
         """Test pretrain_config with custom model parameters."""
@@ -259,6 +259,7 @@ class TestPretrainConfig:
         assert config.ddp.grad_reduce_in_fp32 is True
         assert config.ddp.overlap_grad_reduce is True
         assert config.ddp.overlap_param_gather is True
+        assert config.ddp.use_distributed_optimizer is True
 
     def test_pretrain_config_default_comm_overlap(self):
         """Test default CommOverlapConfig setup."""
@@ -290,7 +291,7 @@ class TestPretrainConfig:
         assert config.scheduler.lr_decay_style == "cosine"
         assert config.scheduler.lr_warmup_iters == 2000
         assert config.scheduler.lr_warmup_init == 0.0
-        assert config.scheduler.lr_decay_iters == 50000  # Should match train_iters
+        assert config.scheduler.lr_decay_iters is None  # Will be set to train_iters during validation
         assert config.scheduler.override_opt_param_scheduler is True
 
     def test_pretrain_config_tokenizer_configuration(self):

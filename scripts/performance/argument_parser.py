@@ -150,8 +150,7 @@ def parse_cli_args():
         "--num_gpus",
         type=int,
         help="Number of gpus.",
-        required=False,
-        default=None,
+        required=True,
     )
     parser.add_argument(
         "-gn",
@@ -213,6 +212,20 @@ def parse_cli_args():
         "--config_file",
         type=str,
         help="Path to the config yaml file to use for the experiment.",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--domain",
+        type=str,
+        help="Domain to use for the experiment- llm, vlm, diffusion. Default: llm",
+        required=False,
+        default="llm",
+    )
+    parser.add_argument(
+        "--use_tokendrop",
+        help="Use token drop. Disabled by default. Currently only supported for DeepSeek v3",
+        type=bool_arg,
         required=False,
         default=None,
     )

@@ -23,11 +23,13 @@ import logging
 
 import torch
 
+from megatron.bridge.training.mixed_precision import get_mixed_precision_config
 from megatron.bridge.training.utils.omegaconf_utils import (
     apply_overrides,
     create_omegaconf_dict_config,
     parse_hydra_overrides,
 )
+from megatron.bridge.utils.common_utils import get_rank_safe
 
 
 def parse_plugin_config_overrides(unknown_args: list[str]) -> list[str]:
@@ -171,6 +173,8 @@ def apply_args_to_config(config, args):
         config.checkpoint.save = args.save_dir
     if args.save_interval:
         config.checkpoint.save_interval = args.save_interval
+    if args.async_save:
+        config.checkpoint.async_save = args.async_save
 
     # Dataset configuration
     logging.info(f"Configuring dataset: type={args.data}")
@@ -269,6 +273,9 @@ def apply_args_to_config(config, args):
         if args.max_steps > 100:
             config.scheduler.lr_warmup_iters = int(0.01 * args.max_steps)
 
+    if args.precision_config_name:
+        config.mixed_precision = get_mixed_precision_config(args.precision_config_name)
+
     # Profiling configuration
     if args.nsys or args.mem:
         from megatron.bridge.training.config import ProfilingConfig
@@ -289,18 +296,24 @@ def setup_argument_parser():
 
     # Model specification
     parser.add_argument("--model-family", required=True, help="Model family (e.g., llama)")
-    parser.add_argument("--recipe-name", required=True, help="Recipe name (e.g., pretrain_llama3_8b)")
+    parser.add_argument("--recipe-name", required=True, help="Recipe name (e.g., llama3_8b_pretrain_config)")
     parser.add_argument("--exp-name", required=True, help="Experiment name for logging and checkpoints")
 
     # Training modes
     parser.add_argument("--pretrain", action="store_true", help="Run pretraining")
     parser.add_argument("--finetune", action="store_true", help="Run finetuning")
+    parser.add_argument(
+        "--config-name", type=str, default=None, help="Config name (defaults to pretrain_config and finetune_config"
+    )
 
     # Training configuration
     parser.add_argument("--max-steps", type=int, default=100, help="Number of training steps")
     parser.add_argument("--gbs", type=int, default=8, help="Global batch size")
     parser.add_argument("--mbs", type=int, default=1, help="Micro batch size")
     parser.add_argument("--seq-length", type=int, help="Sequence length")
+    parser.add_argument(
+        "--precision-config-name", type=str, default=None, help="Precision config name in mixed_precision.py"
+    )
 
     # PEFT configuration
     parser.add_argument("--peft-scheme", type=str, default=None, help="PEFT scheme")
@@ -322,6 +335,7 @@ def setup_argument_parser():
     parser.add_argument("--pretrained-checkpoint", type=str, help="Path to pretrained checkpoint")
     parser.add_argument("--save-dir", type=str, help="Directory to save checkpoints")
     parser.add_argument("--save-interval", type=int, help="Number of iterations between checkpoint saves")
+    parser.add_argument("--async-save", action="store_true", help="Enable async checkpoint saving", default=False)
 
     # Data
     parser.add_argument(
@@ -376,22 +390,75 @@ def main():
     # Parse plugin config overrides from unknown arguments
     plugin_config_overrides = parse_plugin_config_overrides(unknown_args)
 
-    # Import recipe dynamically
-    recipe_module_path = f"megatron.bridge.recipes.{args.model_family}.{args.recipe_name}"
-    logging.info(f"Loading recipe module path: {recipe_module_path}")
-    recipe_module = importlib.import_module(recipe_module_path)
+    # Import recipe dynamically using merged naming convention with legacy fallback.
+    #
+    # Supported cases (in order):
+    # 1) New merged-name API (preferred):
+    #    - Path:  megatron.bridge.recipes.<family>.<merged_name>
+    #    - Args:  --model-family llama --recipe-name llama3_8b_pretrain_config --pretrain
+    #    - Example resolved symbol: megatron.bridge.recipes.llama.llama3_8b_pretrain_config
+    #
+    # 2) Legacy module API (single module exposes config function):
+    #    - Path:  megatron.bridge.recipes.<family>.<module>.<pretrain_config|finetune_config>
+    #    - Args:  --model-family llama --recipe-name llama3 --pretrain
+    #    - Example resolved symbol: megatron.bridge.recipes.llama.llama3.pretrain_config
+    #
+    # 3) Oldest attribute API (family __init__ exposes suffixed names):
+    #    - Path:  megatron.bridge.recipes.<family>.<recipe_name>_<pretrain_config|finetune_config>
+    #    - Args:  --model-family llama --recipe-name llama3_8b --pretrain
+    #    - Example resolved symbol: megatron.bridge.recipes.llama.llama3_8b_pretrain_config
+    #
+    # The resolver below tries (1) then (2) then (3), raising a clear error if none match.
+    merged_attr = args.recipe_name
+    family_pkg_path = f"megatron.bridge.recipes.{args.model_family}"
+    logging.info(f"Attempting merged-name import: {family_pkg_path}.{merged_attr}")
 
-    # Get base configuration from recipe based on training mode
-    if args.pretrain:
-        if not hasattr(recipe_module, "pretrain_config"):
-            raise ValueError(f"Recipe {recipe_module_path} must have 'pretrain_config' function for pretraining")
-        base_config = recipe_module.pretrain_config(dir="/nemo_run/", name=args.exp_name)
-    elif args.finetune:
-        if not hasattr(recipe_module, "finetune_config"):
-            raise ValueError(f"Recipe {recipe_module_path} must have 'finetune_config' function for finetuning")
-        base_config = recipe_module.finetune_config(dir="/nemo_run/", name=args.exp_name)
-    else:
-        raise ValueError("Must specify either --pretrain or --finetune")
+    try:
+        family_pkg = importlib.import_module(family_pkg_path)
+        if not hasattr(family_pkg, merged_attr):
+            raise AttributeError
+        config_builder = getattr(family_pkg, merged_attr)
+        logging.info(f"Using merged recipe API: {family_pkg_path}.{merged_attr}")
+    except Exception:
+        # Legacy fallback paths
+        # 1) args.recipe_name is a module under the family exposing pretrain_config/finetune_config
+        legacy_module_path = f"{family_pkg_path}.{args.recipe_name}"
+        logging.info(f"Merged import failed; trying legacy module path: {legacy_module_path}")
+
+        # Determine function name by mode
+        if args.pretrain:
+            config_name = args.config_name or "pretrain_config"
+        elif args.finetune:
+            config_name = args.config_name or "finetune_config"
+        else:
+            raise ValueError("Must specify either --pretrain or --finetune")
+
+        try:
+            recipe_module = importlib.import_module(legacy_module_path)
+            if not hasattr(recipe_module, config_name):
+                raise AttributeError
+            config_builder = getattr(recipe_module, config_name)
+            logging.info(f"Using legacy module API: {legacy_module_path}.{config_name}")
+        except Exception:
+            # 2) Oldest style: attribute on family package named <recipe_name>_<config_name>
+            # Avoid double suffixing if user already passed a merged name
+            if merged_attr.endswith("_pretrain_config") or merged_attr.endswith("_finetune_config"):
+                legacy_attr = merged_attr
+            else:
+                legacy_attr = f"{args.recipe_name}_{config_name}"
+            logging.info(f"Trying oldest legacy attribute: {family_pkg_path}.{legacy_attr}")
+            family_pkg = importlib.import_module(family_pkg_path)
+            if not hasattr(family_pkg, legacy_attr):
+                raise ValueError(
+                    "Unable to resolve recipe. Tried: "
+                    f"(1) {family_pkg_path}.{merged_attr}, "
+                    f"(2) {legacy_module_path}.{config_name}, "
+                    f"(3) {family_pkg_path}.{legacy_attr}"
+                )
+            config_builder = getattr(family_pkg, legacy_attr)
+            logging.info(f"Using oldest legacy API: {family_pkg_path}.{legacy_attr}")
+
+    base_config = config_builder(dir="/nemo_run/", name=args.exp_name)
 
     # Apply plugin config overrides first (lower priority)
     if plugin_config_overrides:
@@ -403,8 +470,9 @@ def main():
     final_config = apply_args_to_config(base_config, args)
 
     # Log final configuration
-    logging.info("Final configuration:")
-    final_config.to_yaml()
+    if get_rank_safe() == 0:
+        logging.info("Final configuration:")
+        final_config.print_yaml()
 
     if args.pretrain:
         logging.info("Starting pretraining")

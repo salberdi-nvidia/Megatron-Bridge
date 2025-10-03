@@ -37,6 +37,7 @@ from megatron.core.transformer.module import MegatronModule
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import (
     get_pg_size,
+    unwrap_model,
 )
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from transformers.modeling_utils import PreTrainedModel
@@ -50,7 +51,7 @@ from megatron.bridge.models.conversion.utils import (
 )
 from megatron.bridge.models.decorators.dispatch import dispatch
 from megatron.bridge.models.model_provider import ModelProviderMixin
-from megatron.bridge.utils.common_utils import print_rank_0, unwrap_model
+from megatron.bridge.utils.common_utils import print_rank_0
 
 
 logger = logging.getLogger(__name__)
@@ -213,7 +214,7 @@ class MegatronModelBridge(Generic[HFPreTrained, ModelProviderTarget, MegatronMod
 
             # The bridge is typically not instantiated directly
             # Instead, use AutoBridge or AutoBridge which handle this
-            bridge = AutoBridge.from_hf_pretrained("meta-llama/Llama-3-8B")
+            bridge = AutoBridge.from_hf_pretrained("meta-llama/Meta-Llama-3-8B")
             provider = bridge.to_megatron_provider()
 
     Note:
@@ -344,20 +345,26 @@ class MegatronModelBridge(Generic[HFPreTrained, ModelProviderTarget, MegatronMod
         is_main_rank = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
         bridge_name = self.__class__.__name__
 
-        with Progress(
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TimeRemainingColumn(),
-            TextColumn("({task.completed}/{task.total})"),
-            TextColumn("{task.fields[bridge]}"),
-            disable=not (is_main_rank and show_progress),
-        ) as progress:
-            task_id = progress.add_task(description, total=len(tasks), bridge=bridge_name)
+        if show_progress:
+            with Progress(
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                TimeRemainingColumn(),
+                TextColumn("({task.completed}/{task.total})"),
+                TextColumn("{task.fields[bridge]}"),
+                disable=not is_main_rank,
+            ) as progress:
+                task_id = progress.add_task(description, total=len(tasks), bridge=bridge_name)
 
+                for task in tasks:
+                    yield task
+                    progress.update(task_id, advance=1)
+        else:
+            # not using disable above because we notice it will dump some empty progress bar,
+            # even when disable is set to True
             for task in tasks:
                 yield task
-                progress.update(task_id, advance=1)
 
 
     def modify_loaded_hf_weight(self, hf_param: str | dict[str, str], hf_state_dict: Mapping[str, torch.Tensor]) -> torch.Tensor:
@@ -775,6 +782,9 @@ class MegatronModelBridge(Generic[HFPreTrained, ModelProviderTarget, MegatronMod
             megatron_model: Megatron model instance or list of model instances.
         """
         unwrapped_model = unwrap_model(megatron_model)[0]
+        # hack for vlm to work properly
+        if hasattr(unwrapped_model, "language_model"):
+            unwrapped_model = unwrapped_model.language_model
         model_config = unwrapped_model.config
         if model_config.share_embeddings_and_output_weights and model_config.pipeline_model_parallel_size > 1:
             # Broadcast embeddings and output weights from rank 0 to embedding group
@@ -844,7 +854,7 @@ class MegatronModelBridge(Generic[HFPreTrained, ModelProviderTarget, MegatronMod
                 mapping = mapping_registry.megatron_to_hf_lookup(global_name)
 
                 if not mapping:
-                    logger.warning(f"WARNING: No megatron to hf mapping found for {global_name}")
+                    logger.warning(f"WARNING: No mapping found for megatron_param: {global_name}")
                     continue
 
                 # ensure hf weights exist

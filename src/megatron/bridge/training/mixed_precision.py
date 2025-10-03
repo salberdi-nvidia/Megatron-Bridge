@@ -75,7 +75,7 @@ class MixedPrecisionConfig:
             if self.fp8_param_gather != value:
                 object.__setattr__(self, "fp8_param_gather", value)
 
-    def __post_init__(self):
+    def finalize(self):
         # If fp8_param is None, initialize it from fp8_param_gather
         if self.fp8_param is None:
             self.fp8_param = self.fp8_param_gather
@@ -142,8 +142,19 @@ MIXED_PRECISION_RECIPES: dict[str, Callable[[], "MixedPrecisionConfig"]] = {}
 
 
 def register(func: Callable[[], "MixedPrecisionConfig"]):
-    """Decorator that registers a mixed-precision recipe factory by its function name."""
-    MIXED_PRECISION_RECIPES[func.__name__] = func
+    """Decorator that registers a mixed-precision recipe factory by its function name.
+
+    Automatically registers both underscore and hyphen versions (e.g., 'bf16_mixed' and 'bf16-mixed')
+    to simplify migrating from NeMo2.
+    """
+    name = func.__name__
+    MIXED_PRECISION_RECIPES[name] = func
+
+    # Also register hyphen version if the name contains underscores
+    if "_" in name:
+        hyphen_name = name.replace("_", "-")
+        MIXED_PRECISION_RECIPES[hyphen_name] = func
+
     return func
 
 
@@ -225,7 +236,7 @@ def bf16_with_mxfp8_mixed() -> MixedPrecisionConfig:
         MixedPrecisionConfig: Configuration for BF16 with MXFP8 mixed precision training
     """
     cfg = bf16_mixed()
-    cfg.fp8 = "hybrid"
+    cfg.fp8 = "e4m3"
     cfg.fp8_recipe = "mxfp8"
     cfg.fp8_param_gather = True
     cfg.reuse_grad_buf_for_mxfp8_param_ag = True
@@ -240,7 +251,7 @@ def fp16_with_mxfp8_mixed() -> MixedPrecisionConfig:
         MixedPrecisionConfig: Configuration for FP16 with MXFP8 mixed precision training
     """
     cfg = fp16_mixed()
-    cfg.fp8 = "hybrid"
+    cfg.fp8 = "e4m3"
     cfg.fp8_recipe = "mxfp8"
     cfg.fp8_param_gather = True
     cfg.reuse_grad_buf_for_mxfp8_param_ag = True
@@ -367,15 +378,17 @@ def fp16_with_fp8_subchannel_scaling_mixed() -> MixedPrecisionConfig:
     return cfg
 
 
-def get_mixed_precision_config(name: str) -> MixedPrecisionConfig:
+def get_mixed_precision_config(name: str | MixedPrecisionConfig) -> MixedPrecisionConfig:
     """Return a :class:`MixedPrecisionConfig` for *name*.
 
     Args:
-        name: Key of the recipe in :pydata:`MIXED_PRECISION_RECIPES`.
+        name: Key of the recipe in :pydata:`MIXED_PRECISION_RECIPES` or a :class:`MixedPrecisionConfig` instance.
 
     Raises:
         ValueError: If *name* is not a known recipe.
     """
+    if isinstance(name, MixedPrecisionConfig):
+        return name
     try:
         return MIXED_PRECISION_RECIPES[name]()
     except KeyError as err:

@@ -18,6 +18,13 @@ from pathlib import Path
 
 import torch
 
+from megatron.bridge.training.utils.checkpoint_utils import (
+    TRACKER_PREFIX,
+    get_checkpoint_name,
+    get_checkpoint_tracker_filename,
+    get_checkpoint_train_state_filename,
+)
+
 
 def initialize_distributed() -> None:
     """Initialize global process group for distributed execution."""
@@ -95,25 +102,52 @@ def clear_directories(path: str) -> None:
         torch.distributed.barrier()
 
 
-def verify_checkpoint_files(checkpoint_dir: str, iteration_count: int) -> None:
-    """Verify that checkpoint files were created correctly."""
+def verify_checkpoint_files(checkpoint_dir: str, iteration_count: int, ckpt_format: str = "torch_dist") -> None:
+    """Verify that checkpoint files were created correctly for different checkpoint formats.
+
+    Args:
+        checkpoint_dir: Directory containing checkpoints
+        iteration_count: Expected iteration number for the checkpoint
+        ckpt_format: Checkpoint format ("torch_dist", "fsdp_dtensor", etc.)
+    """
     if torch.distributed.is_initialized():
         torch.distributed.barrier()
 
     if torch.distributed.get_rank() == 0:
-        latest_tracker_file = os.path.join(checkpoint_dir, "latest_train_state.pt")
+        # Verify Megatron-Bridge tracker file
+        latest_tracker_file = get_checkpoint_train_state_filename(checkpoint_dir, prefix=TRACKER_PREFIX)
         assert os.path.exists(latest_tracker_file), "Latest checkpoint tracker file not found"
 
-        final_iter_dir = os.path.join(checkpoint_dir, f"iter_{iteration_count:07d}")
+        # Verify Megatron-LM compatibility tracker file
+        megatron_lm_tracker = get_checkpoint_tracker_filename(checkpoint_dir)
+        assert os.path.exists(megatron_lm_tracker), "Megatron-LM tracker file not found"
+
+        # Verify the tracker file contains the correct iteration
+        with open(megatron_lm_tracker, "r") as f:
+            saved_iteration = f.read().strip()
+        assert saved_iteration == str(iteration_count), (
+            f"Megatron-LM tracker file contains '{saved_iteration}', expected '{iteration_count}'"
+        )
+
+        final_iter_dir = get_checkpoint_name(checkpoint_dir, iteration_count, release=False)
         assert os.path.exists(final_iter_dir), f"Final checkpoint directory not found at {final_iter_dir}"
 
         metadata_file = os.path.join(final_iter_dir, ".metadata")
         assert os.path.exists(metadata_file), "Checkpoint metadata file not found"
 
+        # Both formats use torch.distributed.checkpoint but may create different numbers of .distcp files
         distcp_files = [f for f in os.listdir(final_iter_dir) if f.endswith(".distcp")]
-        num_expected_files = 2 * torch.distributed.get_world_size()
+
+        if ckpt_format == "torch_dist":
+            num_expected_files = 2 * torch.distributed.get_world_size()
+        elif ckpt_format == "fsdp_dtensor":
+            # fsdp_dtensor format creates .distcp files (one per rank)
+            num_expected_files = torch.distributed.get_world_size()
+        else:
+            raise ValueError(f"Unsupported checkpoint format for verification: {ckpt_format}")
+
         assert len(distcp_files) == num_expected_files, (
-            f"Expected {num_expected_files} .distcp files, found {len(distcp_files)}: {distcp_files}"
+            f"Expected {num_expected_files} .distcp files for fsdp_dtensor, found {len(distcp_files)}: {distcp_files}"
         )
 
 
@@ -161,7 +195,7 @@ def compare_provider_configs(converted_provider, predefined_provider, model_id):
 
     for attr_name in sorted(converted_keys):
         # Skip excluded attributes
-        if "init_method" in attr_name or attr_name == "generation_config":
+        if "init_method" in attr_name or attr_name == "generation_config" or attr_name == "vocab_size":
             excluded_attrs.add(attr_name)
             continue
 

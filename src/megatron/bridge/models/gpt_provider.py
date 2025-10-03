@@ -26,12 +26,14 @@ from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_layer_local_spec,
     get_gpt_layer_with_transformer_engine_spec,
 )
+from megatron.core.post_training.modelopt.gpt.model_specs import get_gpt_modelopt_spec
 from megatron.core.transformer import ModuleSpec
 from megatron.core.transformer.dot_product_attention import DotProductAttention as MCoreDotProductAttention
 from megatron.core.transformer.enums import AttnBackend
 from megatron.core.transformer.transformer_config import TransformerConfig
 
 from megatron.bridge.models.model_provider import ModelProviderMixin
+from megatron.bridge.models.transformer_config import TransformerConfig
 from megatron.bridge.utils import fusions
 from megatron.bridge.utils.vocab_utils import calculate_padded_vocab_size
 
@@ -41,11 +43,16 @@ logger = logging.getLogger(__name__)
 
 def transformer_engine_layer_spec(config: "GPTModelProvider") -> ModuleSpec:
     """Create a Transformer Engine layer specification based on the provided config."""
+    if "use_te_op_fuser" in inspect.signature(get_gpt_layer_with_transformer_engine_spec).parameters:
+        kwargs = {"use_te_op_fuser": config.use_transformer_engine_op_fuser}
+    else:
+        kwargs = {}
     return get_gpt_layer_with_transformer_engine_spec(
         num_experts=config.num_moe_experts,
         moe_grouped_gemm=config.moe_grouped_gemm,
         qk_layernorm=config.qk_layernorm,
         fp8=bool(config.num_moe_experts and (config.fp8 is not None)),
+        **kwargs,
     )
 
 
@@ -80,9 +87,22 @@ def local_layer_spec(config: "GPTModelProvider") -> ModuleSpec:
     )
 
 
+def quantization_layer_spec(config: "GPTModelProvider") -> ModuleSpec:
+    """Layer specification for quantization with ModelOpt."""
+    return get_gpt_modelopt_spec(
+        config=config,
+        local_core_attention=False,
+        remap_te_layernorm=True,
+        real_quant_cfg="None",
+        use_arbitrary_attention_mask=True,
+    )
+
+
 def default_layer_spec(config: "GPTModelProvider") -> ModuleSpec:
     """Determine the most appropriate layer specification based on availability."""
-    if config.use_transformer_engine_full_layer_spec:
+    if config.restore_modelopt_state:
+        return quantization_layer_spec(config)
+    elif config.use_transformer_engine_full_layer_spec:
         return transformer_engine_full_layer_spec(config)
     else:
         return transformer_engine_layer_spec(config)
@@ -114,6 +134,7 @@ class GPTModelProvider(TransformerConfig, ModelProviderMixin[MCoreGPTModel]):
     """Config file when tp_comm_overlap is enabled."""
 
     use_transformer_engine_full_layer_spec: bool = False
+    use_transformer_engine_op_fuser: bool = False
     transformer_layer_spec: Union[ModuleSpec, Callable[["GPTModelProvider"], ModuleSpec]] = default_layer_spec
 
     generation_config: Optional[Any] = None
@@ -151,6 +172,11 @@ class GPTModelProvider(TransformerConfig, ModelProviderMixin[MCoreGPTModel]):
     persist_layer_norm: bool = False
     bias_dropout_fusion: bool = field(default_factory=fusions.can_enable_bias_dropout_fusion)
     apply_rope_fusion: bool = field(default_factory=fusions.can_enable_apply_rope_fusion)
+
+    # If True, restore the modelopt_state that contains quantization, sparsity, speculative decoding transformation state.
+    # When resuming modelopt_state, we also change the transformer_layer_spec to `megatron.core.post_training.modelopt.gpt.model_specs` which is a combination of local spec + TEDotProductAttention.
+
+    restore_modelopt_state: bool = False
 
     def provide(self, pre_process=None, post_process=None, vp_stage=None) -> MCoreGPTModel:
         """Configure and instantiate a Megatron Core GPT model based on this configuration.
@@ -289,6 +315,10 @@ def mtp_block_spec(config: "GPTModelProvider", vp_stage: Optional[int] = None) -
                 spec = config.transformer_layer_spec(config)
         else:
             spec = config.transformer_layer_spec
+        if hasattr(spec, "layer_specs") and len(spec.layer_specs) == 0:
+            # Get the decoder layer spec explicitly if no decoder layer in the last stage,
+            # Only happens with block spec (TransformerBlockSubmodules) when using MoE.
+            spec = default_layer_spec(config)
         return get_gpt_mtp_block_spec(config, spec, use_transformer_engine=True, vp_stage=vp_stage)
     else:
         return None
