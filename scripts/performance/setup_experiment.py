@@ -117,6 +117,17 @@ if __name__ == "__main__":
         if args.compute_dtype == "fp8" and args.fp8_recipe in ["cs", "mx"]:
             executor.env_vars["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
             executor.env_vars["CUDA_DEVICE_MAX_CONNECTIONS"] = "32"
+    if args.gpu.lower() in ["h100"]:
+        del_cudnn_ln = False
+        if args.model_name == "llama31" and args.model_size == "405b":
+            del_cudnn_ln = True
+        elif args.model_name == "llama3" and args.model_size == "70b" and args.compute_dtype == "bf16":
+            del_cudnn_ln = True
+        if del_cudnn_ln:
+            if "NVTE_NORM_FWD_USE_CUDNN" in executor.env_vars:
+                executor.env_vars.pop("NVTE_NORM_FWD_USE_CUDNN")
+            if "NVTE_NORM_BWD_USE_CUDNN" in executor.env_vars:
+                executor.env_vars.pop("NVTE_NORM_BWD_USE_CUDNN")
 
     target_script_args = [
         "--config_file",
