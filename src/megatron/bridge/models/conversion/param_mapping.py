@@ -1226,7 +1226,7 @@ class MambaInProjMapping(MegatronParamMapping[Dict[str, torch.Tensor]]):
             megatron_param (str): Megatron parameter name pattern.
             hf_param (str): HuggingFace parameter name pattern.
         """
-        super().__init__(megatron_param, {"hf_param": hf_param})
+        super().__init__(megatron_param=megatron_param, hf_param=hf_param)
         self._tp_mapping = ColumnParallelMapping(megatron_param, megatron_param)
 
     def hf_to_megatron(
@@ -1250,15 +1250,15 @@ class MambaInProjMapping(MegatronParamMapping[Dict[str, torch.Tensor]]):
                                 2 * (d_inner + d_tot_ssm) + config.mamba_num_heads)
 
             # Reshape for tensor parallel distribution
-            reshape_shape = (config.tensor_model_parallel_size, -1, config.hidden_size)
-            z_shard = hf_weights['hf_param'][z_shard_idx].reshape(reshape_shape)
-            x_shard = hf_weights['hf_param'][x_shard_idx].reshape(reshape_shape)
-            B_shard = hf_weights['hf_param'][B_shard_idx].reshape(reshape_shape)
-            C_shard = hf_weights['hf_param'][C_shard_idx].reshape(reshape_shape)
-            dt_shard = hf_weights['hf_param'][dt_shard_idx].reshape(reshape_shape)
+            target_shape = (config.tensor_model_parallel_size, -1, config.hidden_size)
+            z_shard = hf_weights['hf_param'][z_shard_idx].reshape(target_shape)
+            x_shard = hf_weights['hf_param'][x_shard_idx].reshape(target_shape)
+            B_shard = hf_weights['hf_param'][B_shard_idx].reshape(target_shape)
+            C_shard = hf_weights['hf_param'][C_shard_idx].reshape(target_shape)
+            dt_shard = hf_weights['hf_param'][dt_shard_idx].reshape(target_shape)
             
             merged = torch.cat([z_shard, x_shard, B_shard, C_shard, dt_shard], dim=1)
-            merged = merged.reshape(*reshape_shape[1:])
+            merged = merged.reshape(*target_shape[1:])
         else:
             merged = None
 
@@ -1316,16 +1316,7 @@ class MambaInProjMapping(MegatronParamMapping[Dict[str, torch.Tensor]]):
                 full_weight = torch.cat(gathered, dim=0)
             full_weights.append(full_weight)
 
-        return {self.hf_param["hf_param"]: torch.cat(full_weights, dim=0)}
-
-    def resolve(self, captures: Tuple[str, ...]) -> "MegatronParamMapping":
-        """Return a new resolved MambaInProjMapping instance."""
-        resolved_megatron_param, resolved_hf_param = self._resolve_names(captures)
-
-        return type(self)(
-            resolved_megatron_param,
-            resolved_hf_param["hf_param"],
-        )
+        return {self.hf_param: torch.cat(full_weights, dim=0)}
 
 class MambaConv1dMapping(MegatronParamMapping[Dict[str, torch.Tensor]]):
     """Mapping for Mamba 1D convolution weights that handles x, B, C components.
@@ -1341,7 +1332,7 @@ class MambaConv1dMapping(MegatronParamMapping[Dict[str, torch.Tensor]]):
             megatron_param (str): Megatron parameter name pattern.
             hf_param (str): HuggingFace parameter name pattern.
         """
-        super().__init__(megatron_param, {"hf_param": hf_param})
+        super().__init__(megatron_param=megatron_param, hf_param=hf_param)
         self._tp_mapping = ColumnParallelMapping(megatron_param, megatron_param)
 
     def hf_to_megatron(
@@ -1355,10 +1346,10 @@ class MambaConv1dMapping(MegatronParamMapping[Dict[str, torch.Tensor]]):
             
             # Determine reshape based on weight vs bias
             if 'weight' in self.megatron_param:
-                reshape_shape = (config.tensor_model_parallel_size, -1, *hf_weights['hf_param'].shape[-2:])
+                target_shape = (config.tensor_model_parallel_size, -1, *hf_weights['hf_param'].shape[-2:])
             else:
                 assert 'bias' in self.megatron_param, "Only bias and weight are supported for conv1d"
-                reshape_shape = (config.tensor_model_parallel_size, -1)
+                target_shape = (config.tensor_model_parallel_size, -1)
 
             d_inner = config.mamba_num_heads * config.mamba_head_dim
             d_tot_ssm = config.mamba_state_dim * config.mamba_num_groups
@@ -1369,12 +1360,12 @@ class MambaConv1dMapping(MegatronParamMapping[Dict[str, torch.Tensor]]):
             C_shard_idx = torch.arange(d_tot_ssm) + d_inner + d_tot_ssm
             
             # Extract and reshape components
-            x_shard = hf_weights['hf_param'][x_shard_idx].reshape(reshape_shape)
-            B_shard = hf_weights['hf_param'][B_shard_idx].reshape(reshape_shape)
-            C_shard = hf_weights['hf_param'][C_shard_idx].reshape(reshape_shape)
+            x_shard = hf_weights['hf_param'][x_shard_idx].reshape(target_shape)
+            B_shard = hf_weights['hf_param'][B_shard_idx].reshape(target_shape)
+            C_shard = hf_weights['hf_param'][C_shard_idx].reshape(target_shape)
             
             merged = torch.cat([x_shard, B_shard, C_shard], dim=1)
-            merged = merged.reshape(*reshape_shape[1:])
+            merged = merged.reshape(*target_shape[1:])
         else:
             merged = None
 
@@ -1427,16 +1418,7 @@ class MambaConv1dMapping(MegatronParamMapping[Dict[str, torch.Tensor]]):
                 full_weight = torch.cat(gathered, dim=0)
             full_weights.append(full_weight)
 
-        return {self.hf_param["hf_param"]: torch.cat(full_weights, dim=0)}
-        
-    def resolve(self, captures: Tuple[str, ...]) -> "MegatronParamMapping":
-        """Return a new resolved MambaConv1dMapping instance."""
-        resolved_megatron_param, resolved_hf_param = self._resolve_names(captures)
-
-        return type(self)(
-            resolved_megatron_param,
-            resolved_hf_param["hf_param"],
-        )
+        return {self.hf_param: torch.cat(full_weights, dim=0)}
 
 class GatedMLPMapping(MegatronParamMapping[Dict[str, torch.Tensor]]):
     r"""Mapping for **gated-MLP** projection weights (SwiGLU / GeGLU).
