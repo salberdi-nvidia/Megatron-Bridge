@@ -435,18 +435,20 @@ def training_log(
                     dump(snapshot, f)
         if logger_config.log_throughput_to_wandb or logger_config.log_throughput_to_tensorboard:
             throughput_report = report_throughput(
-                itreation=iteration,
+                iteration=iteration,
                 train_config=train_config,
                 seq_length=config.dataset.sequence_length,
                 history_wct=history_wct,
                 window_size=logger_config.throughput_window_size,
             )
             num_flops = num_floating_point_operations(config, batch_size)
-            num_tflops = num_flops / elapsed_time_per_iteration / 1e12
-            num_tflops_per_gpu = num_tflops / get_world_size_safe()
+            # elapsed_time = timers("interval-time").elapsed()
+            # elapsed_time_per_iteration = elapsed_time / total_iterations
+            # num_tflops = num_flops / elapsed_time_per_iteration / 1e12
+            # num_tflops_per_gpu = num_tflops / get_world_size_safe()
 
-            throughput_report["throughput/tflops"] = num_tflops
-            throughput_report["throughput/tflops/device"] = num_tflops_per_gpu
+            # throughput_report["throughput/tflops"] = num_tflops
+            # throughput_report["throughput/tflops/device"] = num_tflops_per_gpu
 
             if wandb_writer and logger_config.log_throughput_to_wandb:
                 wandb_writer.log(throughput_report, iteration)
@@ -628,7 +630,7 @@ def training_log(
                 num_microbatches = get_num_microbatches()
                 report_theoretical_memory(config, num_microbatches=num_microbatches, verbose=True)
             memory_string = f"(after {iteration} iterations) memory (GB)"
-            for metric, value in report_memory().items():
+            for metric, value in report_memory(logger_config.memory_keys).items():
                 memory_string += f" | {metric}: {value}"
             if parallel_state.get_data_parallel_rank() == 0:
                 print("[Rank {}] {}".format(torch.distributed.get_rank(), memory_string), flush=True)
@@ -850,7 +852,7 @@ def report_throughput(
     Returns:
         Dictionary with throughput metrics.
     """
-    if iteration >= (window_size - 1):
+    if iteration >= window_size:
         history_iters = [i for i in range(iteration - window_size + 1, iteration + 1)]
         history_samples = [i * train_config.global_batch_size for i in history_iters]
         history_tokens = [i * seq_length for i in history_samples]

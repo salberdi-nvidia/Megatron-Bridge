@@ -161,7 +161,7 @@ def main() -> None:
     logger.debug("Applying final merged configuration back to Python ConfigContainer...")
     final_overrides_as_dict = OmegaConf.to_container(merged_omega_conf, resolve=True)
     # Apply overrides while preserving excluded fields
-    from megatron.bridge.training.callbacks import MemoryMonitor, SpeedMonitor, RuntimeEstimator, OptimizerMonitor, FLOPsMonitor
+    #from megatron.bridge.training.callbacks import MemoryMonitor, SpeedMonitor, RuntimeEstimator, OptimizerMonitor, FLOPsMonitor
     #callbacks = []
     #callbacks.append(MemoryMonitor())
     #callbacks.append(SpeedMonitor())
