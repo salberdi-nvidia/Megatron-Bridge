@@ -30,7 +30,7 @@ from megatron.core.transformer.moe.moe_utils import track_moe_metrics
 from megatron.core.transformer.multi_token_prediction import MTPLossLoggingHelper
 from megatron.core.utils import get_data_parallel_group_if_dtensor, to_local_if_dtensor
 
-from megatron.bridge.training.config import ConfigContainer
+from megatron.bridge.training.config import ConfigContainer, TrainingConfig
 from megatron.bridge.training.state import GlobalState
 from megatron.bridge.training.utils.flop_utils import num_floating_point_operations
 from megatron.bridge.training.utils.theoretical_memory_utils import report_theoretical_memory
@@ -266,33 +266,6 @@ def calc_dtensor_params_l2_norm(params):
     return total_norm_2.item() ** 0.5
 
 
-def calc_l2_norm_grad(model: Union[MegatronModule, list[MegatronModule]]) -> dict:
-    """ """
-    norm = 0.0
-    optimizer_metrics = {}
-
-    for model_chunk in model:
-        for name, p in model_chunk.named_parameters():
-            if p.main_grad is not None and p.requires_grad:
-
-                # Always log grad norm as a default metric if it's not specified
-                if f'l2_norm/grad/{name}' not in optimizer_metrics:
-                    param_grad_norm = torch.linalg.vector_norm(p.main_grad)
-                    optimizer_metrics[f'l2_norm/grad/{name}'] = param_grad_norm
-
-        for metric in optimizer_metrics:
-            if metric.startswith('l2_norm/grad'):
-                norm += optimizer_metrics[metric] ** 2
-
-        optimizer_metrics['l2_norm/grad/global'] = norm**0.5
-
-        for metric in optimizer_metrics:
-            if isinstance(optimizer_metrics[metric], torch.Tensor):
-                optimizer_metrics[metric] = optimizer_metrics[metric].item()
-    
-    return optimizer_metrics
-
-
 def reduce_max_stat_across_model_parallel_group(stat: Optional[float]) -> Optional[float]:
     """Calculates the max of a stat across the model parallel group.
 
@@ -460,25 +433,52 @@ def training_log(
 
                 with open(config.profiling.memory_snapshot_path, "wb") as f:
                     dump(snapshot, f)
-        if wandb_writer and logger_config.log_throughput_to_wandb:
+        if logger_config.log_throughput_to_wandb or logger_config.log_throughput_to_tensorboard:
             throughput_report = report_throughput(
-                train_state.consumed_train_samples,
-                iteration,
-                train_config,
-                config.dataset.sequence_length,
-                history_wct,
-                window_size=6,
+                itreation=iteration,
+                train_config=train_config,
+                seq_length=config.dataset.sequence_length,
+                history_wct=history_wct,
+                window_size=logger_config.throughput_window_size,
             )
-            wandb_writer.log(throughput_report, iteration)
-        if wandb_writer and logger_config.log_memory_to_wandb:
-            memory_report = {f"memory/{metric}": value for metric, value in report_memory().items()}
-            wandb_writer.log(memory_report, iteration)
-            wandb_writer.log(runtime_report(train_state, global_state.start_time, config.dataset.sequence_length, train_config.train_iters), iteration)
-        if wandb_writer and logger_config.log_l2_norm_grad_to_wandb:
-            wandb_writer.log(calc_l2_norm_grad(model), iteration)
-        if logger_config.log_l2_norm_grad_to_tensorboard:
-            for metric, value in calc_l2_norm_grad(model).items():
-                writer.add_scalar(metric, value, iteration)
+            num_flops = num_floating_point_operations(config, batch_size)
+            per_gpu_tf = num_flops / elapsed_time_per_iteration / get_world_size_safe() / 1e12
+            throughput_report["throughput/tflops/device"] = per_gpu_tf
+
+            if wandb_writer and logger_config.log_throughput_to_wandb:
+                wandb_writer.log(throughput_report, iteration)
+
+            if logger_config.log_throughput_to_tensorboard:
+                for metric, value in throughput_report.items():
+                    writer.add_scalar(metric, value, iteration)
+        if logger_config.log_memory_to_wandb or logger_config.log_memory_to_tensorboard:
+            memory_report = report_memory(memory_keys=logger_config.memory_keys)
+            memory_report = {f'memory/{mem_stat}': val for (mem_stat, val) in memory_report.items()}
+            if wandb_writer and logger_config.log_memory_to_wandb:
+                wandb_writer.log(memory_report, iteration)
+            if logger_config.log_memory_to_tensorboard:
+                for metric, value in memory_report.items():
+                    writer.add_scalar(metric, value, iteration)
+        if logger_config.log_runtime_to_wandb or logger_config.log_runtime_to_tensorboard:
+            runtime_report = report_runtime(
+                train_state=train_state,
+                start_time=global_state.start_time,
+                seq_length=config.dataset.sequence_length,
+                train_iters=train_config.train_iters,
+                time_unit=logger_config.runtime_time_unit,
+            )
+            if wandb_writer and logger_config.log_runtime_to_wandb:
+                wandb_writer.log(runtime_report, iteration)
+            if logger_config.log_runtime_to_tensorboard:
+                for metric, value in runtime_report:
+                    writer.add_scalar(metric, value, iteration)
+        if logger_config.log_l2_norm_grad_to_wandb or logger_config.log_l2_norm_grad_to_tensorboard:
+            l2_report = report_l2_norm_grad(model)
+            if wandb_writer and logger_config.log_l2_norm_grad_to_wandb:
+                wandb_writer.log(l2_report, iteration)
+            if logger_config.log_l2_norm_grad_to_tensorboard:
+                for metric, value in l2_report.items():
+                    writer.add_scalar(metric, value, iteration)
         if wandb_writer:
             wandb_writer.log({"samples vs steps": train_state.consumed_train_samples}, iteration)
         writer.add_scalar("learning-rate", learning_rate, iteration)
@@ -529,9 +529,6 @@ def training_log(
             writer.add_scalar("params-norm vs samples", params_norm, global_state.train_state.consumed_train_samples)
             if wandb_writer:
                 wandb_writer.log({"params-norm": params_norm}, iteration)
-        if logger_config.log_memory_to_tensorboard:
-            for metric, value in report_memory():
-                writer.add_scalar(metric, value, iteration)
 
     if config.model.num_moe_experts is not None:
         moe_loss_scale = 1 / get_num_microbatches()
@@ -580,11 +577,6 @@ def training_log(
 
         if logger_config.log_throughput:
             log_string += f" throughput per GPU (TFLOP/s/GPU): {per_gpu_tf:.1f} |"
-            if logger_config.log_timers_to_tensorboard:
-                if writer:
-                    writer.add_scalar("throughput", per_gpu_tf, iteration)
-                if wandb_writer:
-                    wandb_writer.log({"throughput": per_gpu_tf}, iteration)
 
         if energy_monitor is not None:
             energy = (energy_monitor.lap() / total_iterations) / get_world_size_safe()
@@ -643,15 +635,43 @@ def training_log(
     return report_memory_flag
 
 
-def report_memory() -> dict:
-    """Report current and peak GPU memory usage for the current rank.
-
+def report_memory(memory_keys: Optional[dict[str, str]]) -> dict:
+    """
+    Logs the memory usage of the model.
+    This metric calls the torch memory stats API for CUDA and reports different memory statistics.
+    The following statistics are recorded:
+    +------------------------+----------------------------------------------------------------------------------------+
+    | Statistic              | Description                                                                            |
+    +========================+========================================================================================+
+    | current_allocated_mem  | Current amount of allocated memory in gigabytes.                                       |
+    +------------------------+----------------------------------------------------------------------------------------+
+    | current_active_mem     | Current amount of active memory in gigabytes at the time of recording.                 |
+    +------------------------+----------------------------------------------------------------------------------------+
+    | current_inactive_mem   | Current amount of inactive, non-releaseable memory in gigabytes.                       |
+    +------------------------+----------------------------------------------------------------------------------------+
+    | current_reserved_mem   | Current amount of reserved memory in gigabytes at the time of recording.               |
+    +------------------------+----------------------------------------------------------------------------------------+
+    | peak_allocated_mem     | Peak amount of allocated memory in gigabytes.                                          |
+    +------------------------+----------------------------------------------------------------------------------------+
+    | peak_active_mem        | Peak amount of active memory in gigabytes at the time of recording.                    |
+    +------------------------+----------------------------------------------------------------------------------------+
+    | peak_inactive_mem      | Peak amount of inactive, non-releaseable memory in gigabytes at the time of recording. |
+    +------------------------+----------------------------------------------------------------------------------------+
+    | peak_reserved_mem      | Peak amount of reserved memory in gigabytes at the time of recording.                  |
+    +------------------------+----------------------------------------------------------------------------------------+
+    | alloc_retries          | Number of failed cudaMalloc calls that result in a cache flush and retry.              |
+    +------------------------+----------------------------------------------------------------------------------------+
     Args:
-        name (str): A name to include in the output message (e.g., stage of training).
+        memory_keys (dict[str, str], optional): A dict specifying memory statistics to log. Keys
+            are the names of memory statistics to log from `torch.cuda.memory_stats()`, and values
+            are the names they will be logged under. If not provided, the above statistics are
+            logged. Defaults to None.
+    Returns:
+        Memory metrics dictionary.
     """
 
     memory_stats = torch.cuda.memory_stats()
-    memory_keys = MEMORY_KEYS
+    memory_keys = memory_keys if memory_keys else MEMORY_KEYS
 
     # simplify and reformat the memory_stats
     memory_report = {}
@@ -667,17 +687,93 @@ def report_memory() -> dict:
                 memory_report[name.replace('bytes', 'gigabytes')] = gigabytes
             else:
                 memory_report[name] = memory_stats[torch_name]
-    
+
     return memory_report
 
 
-def runtime_report(
+def report_l2_norm_grad(model: Union[MegatronModule, list[MegatronModule]]) -> dict:
+    """
+    Computes and logs the L2 norm of gradients.
+    L2 norms are calculated after the reduction of gradients across GPUs. This function iterates over the parameters
+    of the model and may cause a reduction in throughput while training large models. In order to ensure the
+    correctness of the norm, this function should be called after gradient unscaling in cases where gradients
+    are scaled.
+    The following statistics are recorded:
+    +-----------------------------------------------+-----------------------------------------------------+
+    | Key                                           | Logged data                                         |
+    +===============================================+=====================================================+
+    |                                               | L2 norm of the gradients of all parameters in       |
+    | ``l2_norm/grad/global``                       | the model.                                          |
+    +-----------------------------------------------+-----------------------------------------------------+
+    |                                               | Layer-wise L2 norms                                 |
+    | ``l2_norm/grad/LAYER_NAME``                   |                                                     |
+    |                                               |                                                     |
+    +-----------------------------------------------+-----------------------------------------------------+
+    Args:
+        model (Union[MegatronModule, list[MegatronModule]]): megatron model state.
+    Returns:
+        Dictionary with L2 norms for each layer.
+    """
+    norm = 0.0
+    optimizer_metrics = {}
+
+    for model_chunk in model:
+        for name, p in model_chunk.named_parameters():
+            if p.main_grad is not None and p.requires_grad:
+
+                # Always log grad norm as a default metric if it's not specified
+                if f'l2_norm/grad/{name}' not in optimizer_metrics:
+                    param_grad_norm = torch.linalg.vector_norm(p.main_grad)
+                    optimizer_metrics[f'l2_norm/grad/{name}'] = param_grad_norm
+
+        for metric in optimizer_metrics:
+            if metric.startswith('l2_norm/grad'):
+                norm += optimizer_metrics[metric] ** 2
+
+        optimizer_metrics['l2_norm/grad/global'] = norm**0.5
+
+        for metric in optimizer_metrics:
+            if isinstance(optimizer_metrics[metric], torch.Tensor):
+                optimizer_metrics[metric] = optimizer_metrics[metric].item()
+    
+    return optimizer_metrics
+
+
+def report_runtime(
     train_state,
     start_time: int,
     seq_length: int,
     train_iters: int,
     time_unit: str = 'seconds'
 ) -> dict:
+    """
+    Estimates total training time.
+    The training time is computed by taking the time elapsed for the current duration and multiplying
+    out to the full extended length of the training run.
+    This metric provides a best attempt estimate. This estimate may be inaccurate if throughput
+    changes through training or other significant changes are made to the model or dataloader.
+    The following statistics are recorded:
+    +-----------------------------+-------------------------------+
+    | Key                         | Logged data                   |
+    +=============================+===============================+
+    | `time/remaining_estimate`   | Estimated time to completion  |
+    +-----------------------------+-------------------------------+
+    | `time/tokens`               | Number of consumed tokens     |
+    +-----------------------------+-------------------------------+
+    | `time/samples`              | Number of consumed samples    |
+    +-----------------------------+-------------------------------+
+    | `time/batches`              | Number of consumed batches    |
+    +-----------------------------+-------------------------------+
+    | `time/total`                | Total training time           |
+    +-----------------------------+-------------------------------+
+    Args:
+        train_state,
+        start_time (int): time when training was started.
+        seq_length (int): model sequence length.
+        train_iters (int): number of train iters to be done per training.
+        time_unit (str, optional): Time unit to use for `time` logging. Can be one of
+            'seconds', 'minutes', 'hours', or 'days'. Defaults to 'hours'.
+    """
     elapsed_dur = train_state.step / train_iters
 
     divider = 1
@@ -709,18 +805,52 @@ def runtime_report(
 
 
 def report_throughput(
-    consumed_train_samples: int,
+    train_config: TrainingConfig,
     iteration: int, 
-    train_config,
     seq_length: int,
     history_wct: list,
-    window_size: int = 100,
+    window_size: int,
 ) -> dict:
+    """
+    Logs the training throughput and utilization.
+    The training throughput is logged on the event once we have reached the `window_size` threshold.
+    The following statistics are recorded:
+    +-------------------------------------+-----------------------------------------------------------+
+    | Key                                 | Logged data                                               |
+    +=====================================+===========================================================+
+    |                                     | Rolling average (over `window_size` most recent           |
+    | `throughput/batches_per_sec`        | batches) of the number of batches processed per second.   |
+    |                                     |                                                           |
+    +-------------------------------------+-----------------------------------------------------------+
+    |                                     | Rolling average (over `window_size` most recent           |
+    | `throughput/samples_per_sec`        | batches) of the number of samples processed per second.   |
+    |                                     |                                                           |
+    +-------------------------------------+-----------------------------------------------------------+
+    |                                     | Rolling average (over `window_size` most recent           |
+    | `throughput/tokens_per_sec`         | batches) of the number of tokens processed per second.    |
+    |                                     | Only logged if dataspec returns tokens per batch.         |
+    +-------------------------------------+-----------------------------------------------------------+
+    | `throughput/device/batches_per_sec` | `throughput/batches_per_sec` divided by world size.       |
+    +-------------------------------------+-----------------------------------------------------------+
+    | `throughput/device/samples_per_sec` | `throughput/samples_per_sec` divided by world size.       |
+    +-------------------------------------+-----------------------------------------------------------+
+    |                                     | `throughput/tokens_per_sec` divided by world size. Only   |
+    | `throughput/device/tokens_per_sec`  | logged if dataspec returns tokens per batch.              |
+    |                                     |                                                           |
+    +-------------------------------------+-----------------------------------------------------------+
+    Args:
+        train_config (TrainingConfig): model train config.
+        iteration (int): current train iteration. 
+        seq_length (int): model sequence length.
+        history_wct (list): list of elapsed time per each iteration.
+        window_size (int, optional): Number of batches to use for a rolling average of throughput.
+    Returns:
+        Dictionary with throughput metrics.
+    """
     if iteration >= (window_size - 1):
         history_iters = [i for i in range(iteration - window_size + 1, iteration + 1)]
         history_samples = [i * train_config.global_batch_size for i in history_iters]
         history_tokens = [i * seq_length for i in history_samples]
-        print(history_iters, history_samples, history_tokens)
         world_size = torch.distributed.get_world_size()
         elapsed_batches = len(history_samples) - 1
         elapsed_samples = int(history_samples[-1]) - int(history_samples[0])

@@ -662,6 +662,7 @@ class LoggerConfig:
     """Enable throughput logging to wandb."""
 
     throughput_window_size: int = 100
+    """Number of batches to use for a rolling average of throughput."""
 
     log_progress: bool = False
     """If set, log progress (in terms of number of processed tokens and number of floating-point operations)
@@ -710,6 +711,9 @@ class LoggerConfig:
     log_memory_to_wandb: bool = False
     """Enable memory logging to wandb."""
 
+    memory_keys: dict[str, str] = None
+    """Names of memory statistics to log from `torch.cuda.memory_stats()`"""
+
     log_l2_norm_grad_to_tensorboard: bool = False
     """Enable gradients logging to tensorboard."""
 
@@ -721,6 +725,9 @@ class LoggerConfig:
 
     log_runtime_to_wandb: bool = False
     """Enable runtime metrics logging to wandb."""
+
+    runtime_time_unit: str = "hours"
+    """ Time unit to use for time logging. """
 
     log_world_size_to_tensorboard: bool = False
     """Enable world size logging to tensorboard."""
