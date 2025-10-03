@@ -26,7 +26,7 @@ from megatron.core.optimizer import OptimizerConfig
 from megatron.core.transformer import MegatronModule
 from megatron.core.utils import get_model_config
 
-from megatron.bridge.models.model_provider import ModelProviderMixin
+from megatron.bridge.models.model_provider import ModelParallelKwargs, ModelProviderMixin
 from megatron.bridge.training.checkpointing import save_checkpoint
 from megatron.bridge.training.config import CheckpointConfig, ConfigContainer, LoggerConfig
 from megatron.bridge.training.state import GlobalState
@@ -163,6 +163,7 @@ def load_megatron_model(
     return_state_dict: bool = False,
     use_cpu_init: bool = True,
     skip_temp_dist_context: Optional[bool] = None,
+    mp_overrides: Optional[ModelParallelKwargs] = None,
 ) -> Union[Any, dict[str, torch.Tensor]]:
     """Load a Megatron model from a distributed checkpoint.
 
@@ -212,6 +213,23 @@ def load_megatron_model(
     else:
         model_cfg = _transformer_config_from_args(mlm_args)
         assert model_type in ("gpt", "mamba"), f"model type {model_type} not supported."
+
+    # If in single GPU environment, reset additional parallel settings
+    model_cfg.tensor_model_parallel_size = 1
+    model_cfg.pipeline_model_parallel_size = 1
+    model_cfg.context_parallel_size = 1
+    model_cfg.expert_model_parallel_size = 1
+    model_cfg.expert_tensor_parallel_size = 1
+    model_cfg.moe_extended_tp = False
+    model_cfg.sequence_parallel = False
+    model_cfg.virtual_pipeline_model_parallel_size = None
+    model_cfg.hierarchical_context_parallel_sizes = None
+
+    # Apply model-parallel overrides if provided
+    if mp_overrides:
+        for key, value in mp_overrides.items():
+            if hasattr(model_cfg, key) and value is not None:
+                setattr(model_cfg, key, value)
 
     def _call_model_provider(model_cfg):
         """Handles provider call for both MBridge and MLM providers."""

@@ -121,6 +121,44 @@ def get_checkpoint_version() -> Optional[float]:
     return _CHECKPOINT_VERSION
 
 
+def delete_extra_state(state_dict):
+    """Delete all extra state keys from the model state dictionary.
+
+    This function removes all keys containing '_extra_state' from the model
+    portion of the state dictionary. This is useful for cleaning up corrupted
+    or problematic extra state that can cause issues during model loading.
+
+    Args:
+        state_dict: The state dictionary. Can be either:
+                   - A full checkpoint dict with a "model" key, or
+                   - A model state dict directly
+
+    Returns:
+        The modified state dictionary with extra state keys removed.
+    """
+    # Handle both cases: full checkpoint dict with "model" key or direct model state dict
+    if isinstance(state_dict, dict) and "model" in state_dict:
+        # Full checkpoint dict case
+        target_dict = state_dict["model"]
+    else:
+        # Direct model state dict case
+        target_dict = state_dict
+
+    # If target is not a mapping-like object, nothing to clean
+    if not hasattr(target_dict, "keys"):
+        return state_dict
+
+    # Some objects may implement keys() but not be directly iterable into a list (e.g., mocks)
+    try:
+        keys = list(target_dict.keys())
+    except Exception:
+        return state_dict
+
+    for key in keys:
+        if isinstance(key, str) and "_extra_state" in key:
+            del target_dict[key]
+    return state_dict
+
 def find_checkpoint_rank_0(checkpoints_path: str, iteration: int, release: bool = False) -> Optional[str]:
     """Find the checkpoint directory for a given iteration, assuming distributed checkpoints.
 
@@ -849,6 +887,9 @@ def _load_model_weights_from_checkpoint(
     state_dict = dist_checkpointing.load(
         sharded_state_dict, checkpoint_path, load_strategy, strict=dist_ckpt_strictness
     )
+    # we keep weights only for bridge use, remove extra state
+    # because they are not needed and could cause unexpected issues.
+    delete_extra_state(state_dict)
     if return_state_dict:
         return state_dict
 
