@@ -7,7 +7,9 @@
 :hidden:
 
 parallelisms.md
+performance-summary.md
 performance-guide.md
+recipe-usage.md
 ```
 
 ```{toctree}
@@ -31,10 +33,12 @@ training/profiling.md
 training/checkpointing.md
 training/resiliency.md
 training/mixed-precision.md
+training/communication-overlap.md
 training/attention-optimizations.md
 training/activation-recomputation.md
 training/cpu-offloading.md
 training/peft.md
+training/packed-sequences.md
 ```
 
 ```{toctree}
