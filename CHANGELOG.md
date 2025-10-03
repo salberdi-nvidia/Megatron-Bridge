@@ -32,7 +32,7 @@
     * Fusion of activation and cast fusion (currently tensor-wise scaling only)
     * Store SwiGLU input in FP8 to save aviation memory
 
-## NVIDIA Megatron-Bridge 0.1.0
+## NVIDIA Megatron-Bridge 0.1.0a0
 
 * Llama and Qwen
 * Pretrain/SFT
