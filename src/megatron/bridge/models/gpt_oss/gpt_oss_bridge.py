@@ -17,6 +17,7 @@ from typing import Union, Dict, Optional, Mapping
 import math
 import torch
 import torch.nn as nn
+from megatron.core import parallel_state
 from megatron.core.models.gpt.gpt_model import GPTModel
 from transformers import GenerationConfig, GptOssForCausalLM
 
@@ -88,21 +89,26 @@ class GPTOSSBridge(MegatronModelBridge):
 
     def modify_converted_hf_weight(self, task: WeightConversionTask, converted_weights_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         num_experts = self.hf_config.num_local_experts
-        
+        ep_size = parallel_state.get_expert_model_parallel_world_size()
+        experts_per_rank = num_experts // ep_size
+
         try: 
-            global_expert_number = extract_expert_number_from_param(task.param_name)
+            local_expert_number = extract_expert_number_from_param(task.param_name) % experts_per_rank
         except ValueError:
             # not an expert weight
             return converted_weights_dict
         
         assert len(converted_weights_dict) == 1, f"There should be only one key in the converted_weights_dict, got keys: {converted_weights_dict.keys()}"
         for key, value in converted_weights_dict.items():
-            # there should be only one key in this dict
-            if key not in self.hf_weights_cache:
-                self.hf_weights_cache[key] = {}
-            self.hf_weights_cache[key][global_expert_number] = value
-            logging.debug(f"Loaded {key} for expert {global_expert_number}")
-            if len(self.hf_weights_cache[key]) == num_experts: 
+            ## we end up with ep_size many weights to add to the cache
+            ## unpack the weights and re-index
+            assert value.shape[0] == ep_size
+            for i, exp_val in enumerate(value):
+                global_expert_number = local_expert_number + (i * experts_per_rank)
+                if key not in self.hf_weights_cache:
+                    self.hf_weights_cache[key] = {}
+                self.hf_weights_cache[key][global_expert_number] = exp_val
+            if len(self.hf_weights_cache[key]) == num_experts:
                 logging.debug(f"All experts are loaded for {key}")
                 # all experts are loaded
                 merged_hf_weights = torch.cat([self.hf_weights_cache[key][i].unsqueeze(0) for i in range(num_experts)], dim=0)
