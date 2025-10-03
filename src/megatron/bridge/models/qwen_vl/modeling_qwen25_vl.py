@@ -107,7 +107,10 @@ class Qwen25VLModel(MegatronModule):
         self.language_model = self.config.provide_language_model(
             pre_process=pre_process, post_process=post_process, vp_stage=vp_stage
         )
+
+        # Finalize grad will need these to be bind with module
         self.share_embeddings_and_output_weights = config.share_embeddings_and_output_weights
+        self.shared_embedding_or_output_weight = self.language_model.shared_embedding_or_output_weight
 
         # Bind methods from HF's Qwen2_5_VLModel to this instance
         # get_placeholder_mask is only available in transformers 4.55+
