@@ -545,7 +545,7 @@ class TestTransposeMapping:
 
         with patch.object(mapping._tp_mapping, "hf_to_megatron") as mock_hf_to_megatron:
             mock_hf_to_megatron.return_value = torch.randn(8, 4)
-            result = mapping.hf_to_megatron(hf_weight, megatron_module)
+            mapping.hf_to_megatron(hf_weight, megatron_module)
 
             # Verify the tensor was transposed before being passed to AutoMapping
             mock_hf_to_megatron.assert_called_once()
@@ -603,7 +603,7 @@ class TestTransposeMapping:
         # Mock the AutoMapping's TP behavior
         with patch.object(mapping._tp_mapping, "hf_to_megatron") as mock_hf_to_megatron:
             mock_hf_to_megatron.return_value = torch.randn(4, 4)
-            result = mapping.hf_to_megatron(hf_weight, megatron_module)
+            mapping.hf_to_megatron(hf_weight, megatron_module)
 
             # Verify transpose happened before TP distribution
             mock_hf_to_megatron.assert_called_once()

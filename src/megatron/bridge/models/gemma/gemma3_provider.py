@@ -216,6 +216,7 @@ def gelu_impl(x):
 
 
 def openai_gelu(x):
+    """OpenAI GELU activation function implementation."""
     return gelu_impl(x)
 
 

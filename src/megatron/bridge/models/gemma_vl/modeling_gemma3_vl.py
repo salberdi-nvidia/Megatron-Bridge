@@ -33,6 +33,8 @@ TENorm, _ = safe_import_from("megatron.core.extensions.transformer_engine", "TEN
 
 
 class Gemma3VLModel(MegatronModule):
+    """Gemma3 Vision-Language model implementation for Megatron."""
+
     def __init__(
         self,
         config: GPTModelProvider,
