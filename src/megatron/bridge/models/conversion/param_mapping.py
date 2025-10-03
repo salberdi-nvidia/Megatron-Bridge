@@ -1662,7 +1662,7 @@ class TransposeMapping(MegatronParamMapping[torch.Tensor]):
     weights that need to be transposed
     """
     
-    def __init__(self, megatron_param: str, hf_param: str, dims: Tuple[int, int]):
+    def __init__(self, megatron_param: str, hf_param: str, dims: Tuple[int, int], force_contiguous: bool = False):
         """Initialize vision projector mapping.
         
         Args:
@@ -1673,6 +1673,7 @@ class TransposeMapping(MegatronParamMapping[torch.Tensor]):
         # Delegate tensor-parallel logic to AutoMapping
         self._tp_mapping = AutoMapping(megatron_param, megatron_param)
         self.dims = dims
+        self.force_contiguous = force_contiguous
     
     def hf_to_megatron(
         self,
@@ -1682,6 +1683,8 @@ class TransposeMapping(MegatronParamMapping[torch.Tensor]):
         """Apply permutation and distribute to TP ranks."""
         if self.tp_rank == 0:
             permuted_weights = torch.permute(hf_weights, self.dims)
+            if self.force_contiguous:
+                permuted_weights = permuted_weights.contiguous()
         else:
             permuted_weights = None
         
@@ -1705,6 +1708,8 @@ class TransposeMapping(MegatronParamMapping[torch.Tensor]):
         
         # Apply reverse permutation
         permuted_back = torch.permute(gathered_tensor, self.dims)
+        if self.force_contiguous:
+            permuted_back = permuted_back.contiguous()
         
         return {str(self.hf_param): permuted_back}
     

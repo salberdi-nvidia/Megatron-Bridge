@@ -21,11 +21,11 @@ class Gemma3VLModelProvider(Gemma3ModelProvider):
     mm_tokens_per_image: int = 256
 
     # Token IDs
-    bos_token_id: int = 0
+    bos_token_id: int = 2
     eos_token_id: int = 1
     vision_start_token_id: int = 255999
     vision_end_token_id: int = 256000
-    image_token_id: int = 151655
+    image_token_id: int = 262144
 
     # Freeze options
     freeze_language_model: bool = False

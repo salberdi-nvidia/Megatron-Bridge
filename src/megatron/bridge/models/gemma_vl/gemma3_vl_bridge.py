@@ -105,6 +105,7 @@ class Gemma3VLBridge(MegatronModelBridge):
                     megatron_param="multi_modal_projector.proj.weight",
                     hf_param="multi_modal_projector.mm_input_projection_weight",
                     dims=(1, 0),
+                    force_contiguous=True,
                 ),
                 # QKV: Combine separate Q, K, V matrices into single QKV matrix
                 QKVMapping(
