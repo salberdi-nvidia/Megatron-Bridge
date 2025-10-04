@@ -222,8 +222,11 @@ def train(
         )
         cuda_graph_helper.create_cudagraphs()
 
+    # Track train step elapsed time for throughput logging
+    history_wct = None
+    if config.logger.log_throughput_to_wandb or config.logger.log_throughput_to_tensorboard:
+        history_wct = deque(maxlen=config.logger.throughput_window_size + 1)
     # Run training iterations till done.
-    history_wct = deque(maxlen=config.logger.throughput_window_size + 1)
     while global_state.train_state.step < train_config.train_iters:
         if prof_config and torch.distributed.get_rank() in prof_config.profile_ranks:
             if prof_config.use_pytorch_profiler:
@@ -280,7 +283,8 @@ def train(
             forward_step_func, num_fw_args, train_data_iterator, model, optimizer, scheduler, global_state
         )
         fault_tolerance.on_training_step_end(global_state)
-        history_wct.append(time.time() - global_state.start_time)
+        if config.logger.log_throughput_to_wandb or config.logger.log_throughput_to_tensorboard:
+            history_wct.append(time.time() - global_state.start_time)
         if should_checkpoint:
             save_checkpoint_and_time(
                 global_state,

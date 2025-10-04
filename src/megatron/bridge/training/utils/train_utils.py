@@ -31,7 +31,7 @@ from megatron.core.transformer.multi_token_prediction import MTPLossLoggingHelpe
 from megatron.core.utils import get_data_parallel_group_if_dtensor, to_local_if_dtensor
 
 from megatron.bridge.training.config import ConfigContainer, TrainingConfig
-from megatron.bridge.training.state import GlobalState
+from megatron.bridge.training.state import GlobalState, TrainState
 from megatron.bridge.training.utils.flop_utils import num_floating_point_operations
 from megatron.bridge.training.utils.theoretical_memory_utils import report_theoretical_memory
 from megatron.bridge.utils.common_utils import get_world_size_safe, is_last_rank, print_rank_0, print_rank_last
@@ -358,6 +358,7 @@ def training_log(
     energy_monitor = global_state.energy_monitor
     logger_config = config.logger
     train_config = config.train
+
     # Advanced, skipped, and Nan iterations.
     advanced_iters_key = "advanced iterations"
     skipped_iters_key = "skipped iterations"
@@ -747,7 +748,7 @@ def report_l2_norm_grad(model: Union[MegatronModule, list[MegatronModule]]) -> d
 
 
 def report_runtime(
-    train_state,
+    train_state: TrainState,
     start_time: int,
     seq_length: int,
     train_iters: int,
