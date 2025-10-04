@@ -859,7 +859,7 @@ def report_throughput(
         history_iters = [i for i in range(iteration - window_size + 1, iteration + 1)]
         history_samples = [i * train_config.global_batch_size for i in history_iters]
         history_tokens = [i * seq_length for i in history_samples]
-        world_size = torch.distributed.get_world_size()
+        world_size = get_world_size_safe()
         elapsed_batches = len(history_samples) - 1
         elapsed_samples = int(history_samples[-1]) - int(history_samples[0])
         elapsed_tokens = int(history_tokens[-1]) - int(history_tokens[0])
