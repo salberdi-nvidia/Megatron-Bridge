@@ -63,6 +63,13 @@ def main():
         A2A_1F1B = bool(args.gpu.lower() in ["h100"])
 
         pp, vp = (8, 4) if args.gpu.lower() in ["h100"] else (4, 8)
+        layout = "Et|(tt|)*30mL"
+        if args.gpu.lower() in ["gb200", "gb300"]:
+            pp, vp = (4, 4)
+            layout = None
+        elif args.gpu.lower() in ["b200"]:
+            pp, vp = (16, 1)
+            layout = None
         recipe = deepseek_v3_pretrain_config(
             mock=True,
             precision_config=precision_config,
@@ -70,7 +77,7 @@ def main():
             pipeline_parallelism=pp,
             virtual_pipeline_parallelism=vp,
             enable_deepep=enable_deepep,
-            layout="Et|(tt|)*30mL",
+            layout=layout,
         )
 
         if enable_deepep:
@@ -86,10 +93,10 @@ def main():
             recipe.comm_overlap.overlap_moe_expert_parallel_comm = False
             recipe.comm_overlap.delay_wgrad_compute = False
             recipe.model.moe_shared_expert_overlap = True
-        if args.gpu.lower() in ["h100"]:
+        if args.gpu.lower() in ["h100", "b200"]:
             recipe.model.recompute_modules = ["mla_up_proj", "mlp"]
         elif args.gpu.lower() in ["gb200"]:
-            recipe.model.recompute_modules = ["mla_up_proj", "mlp", "moe_act"]
+            recipe.model.recompute_modules = ["mla_up_proj"]
         if args.gpu.lower() in ["gb200", "b200"]:
             recipe.comm_overlap.overlap_grad_reduce = True
         elif args.gpu.lower() in ["h100"]:
@@ -168,6 +175,11 @@ def main():
             if args.model_size in ["8b", "70b"]:
                 recipe.model.gradient_accumulation_fusion = False
     recipe.model.apply_rope_fusion = True
+
+
+    if args.model_name == "deepseek" and args.model_size == "v3" and args.gpu.lower() in ["gb200", "gb300"]:
+        recipe.dataset.num_workers = 0
+        recipe.dataset.pin_memory = False
 
     pretrain(config=recipe, forward_step_func=forward_step)
 
